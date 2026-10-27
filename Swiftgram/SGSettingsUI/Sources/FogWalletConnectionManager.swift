@@ -36,12 +36,11 @@ private enum FogWalletConnectionError: LocalizedError {
 
 private final class FogWalletAuthBrowserController: ViewController, SFSafariViewControllerDelegate {
     private let safariController: SFSafariViewController
-    private let onUserDismiss: () -> Void
     private(set) var isFlowActive = true
+    private(set) var userDismissedAt: Date?
 
-    init(url: URL, onUserDismiss: @escaping () -> Void) {
+    init(url: URL) {
         self.safariController = SFSafariViewController(url: url)
-        self.onUserDismiss = onUserDismiss
         super.init(navigationBarPresentationData: nil)
         self.statusBar.statusBarStyle = .Ignore
         self.safariController.delegate = self
@@ -67,8 +66,7 @@ private final class FogWalletAuthBrowserController: ViewController, SFSafariView
 
     func safariViewControllerDidFinish(_ controller: SFSafariViewController) {
         guard self.isFlowActive else { return }
-        self.isFlowActive = false
-        self.onUserDismiss()
+        self.userDismissedAt = Date()
         self.dismiss(animated: false)
     }
 
@@ -131,9 +129,7 @@ public final class FogWalletConnectionManager {
                         completion(result)
                     }
 
-                    let controller = FogWalletAuthBrowserController(url: url) {
-                        finish(.failure(FogWalletConnectionError.authorizationCancelled))
-                    }
+                    let controller = FogWalletAuthBrowserController(url: url)
                     presentBrowser(controller)
 
                     self.poll(
@@ -184,6 +180,12 @@ public final class FogWalletConnectionManager {
         finish: @escaping (Result<Void, Error>) -> Void
     ) {
         guard browser.isFlowActive else { return }
+        if let dismissedAt = browser.userDismissedAt,
+           Date().timeIntervalSince(dismissedAt) >= 20 {
+            browser.closeAfterCompletion()
+            finish(.failure(FogWalletConnectionError.authorizationCancelled))
+            return
+        }
         if Date().timeIntervalSince(startedAt) >= self.flowLifetime || attempt >= 120 {
             browser.closeAfterCompletion()
             finish(.failure(FogWalletConnectionError.authorizationExpired))
