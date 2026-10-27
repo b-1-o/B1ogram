@@ -512,12 +512,15 @@ private func biogramControllerEntries(state: BiogramControllerState) -> [Biogram
 }
 
 public func biogramSettingsController(context: AccountContext) -> ViewController {
-    let accountId = String(context.account.peerId.id._internalGetInt64Value())
-    let initialState = BiogramControllerState.current(accountId: accountId)
+    // Preserve the existing Biogram account key for its local preferences.
+    let accountId = String(context.account.peerId.toInt64())
+    // Use Telegram's raw user ID only for Fog Wallet's explicit account-link check.
+    let fogWalletAccountId = String(context.account.peerId.id._internalGetInt64Value())
+    let initialState = BiogramControllerState.current(accountId: fogWalletAccountId)
     let statePromise = ValuePromise(initialState, ignoreRepeated: true)
     let stateValue = Atomic(value: initialState)
     let updateState: (() -> Void) = {
-        let newState = BiogramControllerState.current(accountId: accountId)
+        let newState = BiogramControllerState.current(accountId: fogWalletAccountId)
         _ = stateValue.swap(newState)
         statePromise.set(newState)
     }
@@ -730,7 +733,7 @@ public func biogramSettingsController(context: AccountContext) -> ViewController
                         let telegramUserId = String(context.account.peerId.id._internalGetInt64Value())
                         FogWalletConnectionManager.shared.connect(
                             telegramUserId: telegramUserId,
-                            accountId: accountId,
+                            accountId: fogWalletAccountId,
                             presentBrowser: { browser in
                                 presentControllerImpl?(browser, nil)
                             },
@@ -767,7 +770,7 @@ public func biogramSettingsController(context: AccountContext) -> ViewController
                 message: "This revokes Fog Wallet sessions on the server and stops this app from using the connection. Issued-card records and transfer history, if any, are not deleted.",
                 actions: [
                     (title: "Disconnect", destructive: true, action: {
-                        FogWalletConnectionManager.shared.disconnect(accountId: accountId) { result in
+                        FogWalletConnectionManager.shared.disconnect(accountId: fogWalletAccountId) { result in
                             Queue.mainQueue().async {
                                 updateState()
                                 switch result {
