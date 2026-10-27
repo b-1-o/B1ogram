@@ -260,10 +260,12 @@ async function verifyIdToken(idToken, clientId, expectedNonce, expectedTelegramI
     claims.iat > now + 60 ||
     claims.exp <= claims.iat ||
     claims.exp - claims.iat > 2 * 60 * 60 ||
-    claims.nonce !== expectedNonce ||
-    !/^\d{1,24}$/.test(telegramId) ||
-    telegramId !== expectedTelegramId
+    claims.nonce !== expectedNonce
   ) {
+    throw new AuthFlowError();
+  }
+
+  if (!/^\d{1,24}$/.test(telegramId) || telegramId !== expectedTelegramId) {
     throw new AuthFlowError("telegram_account_mismatch");
   }
 
