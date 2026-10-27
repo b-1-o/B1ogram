@@ -7,6 +7,9 @@
   "observability": {
     "enabled": false
   },
+  "vars": {
+    "TELEGRAM_CLIENT_ID": "9254075951"
+  },
   "d1_databases": [
     {
       "binding": "DB",
