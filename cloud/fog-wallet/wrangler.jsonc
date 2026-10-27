@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "fog-wallet-api",
+  "main": "src/index.js",
+  "compatibility_date": "2026-10-27",
+  "workers_dev": true,
+  "observability": {
+    "enabled": false
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "fog-wallet-db",
+      "database_id": "87080a92-8b59-4699-a62f-1719244c2590",
+      "migrations_dir": "migrations"
+    }
+  ]
+}
