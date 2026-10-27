@@ -165,7 +165,14 @@ public final class FogWalletConnectionManager {
                     self.deleteAccessToken(accountId: accountId)
                     completion(.success(()))
                 case let .failure(error):
-                    completion(.failure(error))
+                    if let connectionError = error as? FogWalletConnectionError,
+                       case .serverRejected = connectionError {
+                        // The server no longer accepts this session, so clear the stale local credential.
+                        self.deleteAccessToken(accountId: accountId)
+                        completion(.success(()))
+                    } else {
+                        completion(.failure(error))
+                    }
                 }
             }
         }
