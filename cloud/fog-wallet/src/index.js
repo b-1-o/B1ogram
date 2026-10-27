@@ -364,7 +364,7 @@ async function telegramCallback(request, env) {
     return htmlPage("Connection expired", "This sign-in request is no longer active. Return to Biogram and start again.", 400);
   }
 
-  if (providerError || !/^[A-Za-z0-9._~-]{1,4096}$/.test(code)) {
+  if (providerError || code.length < 1 || code.length > 4096 || /[\\r\\n]/.test(code)) {
     await markFlowFailed(env, stateHash, providerError ? "telegram_login_cancelled" : "invalid_authorization_code");
     return htmlPage("Connection cancelled", "No Fog Wallet connection was created. You can return to Biogram.");
   }
@@ -583,12 +583,14 @@ async function disconnect(request, env) {
 
   const now = Math.floor(Date.now() / 1000);
   try {
-    await env.DB.prepare(
-      "UPDATE user_sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL"
-    ).bind(now, user.id).run();
-    await env.DB.prepare(
-      "UPDATE user_card_settings SET public_enabled = 0, updated_at = ? WHERE user_id = ?"
-    ).bind(now, user.id).run();
+    await env.DB.batch([
+      env.DB.prepare(
+        "UPDATE user_sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL"
+      ).bind(now, user.id),
+      env.DB.prepare(
+        "UPDATE user_card_settings SET public_enabled = 0, updated_at = ? WHERE user_id = ?"
+      ).bind(now, user.id)
+    ]);
   } catch {
     return json({ error: "database_unavailable" }, 503);
   }
