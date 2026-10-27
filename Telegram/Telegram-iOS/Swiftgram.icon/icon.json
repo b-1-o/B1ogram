@@ -39,7 +39,7 @@
           ],
           "glass" : true,
           "image-name" : "Biogram.png",
-          "name" : "Default@3x 2",
+          "name" : "Biogram",
           "opacity-specializations" : [
             {
               "value" : 1
