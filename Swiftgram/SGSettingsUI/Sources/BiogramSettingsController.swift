@@ -530,7 +530,39 @@ public func biogramSettingsController(context: AccountContext) -> ViewController
     }
     // =====================================================================
     var presentControllerImpl: ((ViewController, Any?) -> Void)?
-   
+
+    let startFogWalletConnection: () -> Void = {
+        let telegramUserId = String(context.account.peerId.id._internalGetInt64Value())
+        FogWalletConnectionManager.shared.connect(
+            telegramUserId: telegramUserId,
+            accountId: fogWalletAccountId,
+            presentBrowser: { browser in
+                presentControllerImpl?(browser, nil)
+            },
+            completion: { result in
+                Queue.mainQueue().async {
+                    updateState()
+                    switch result {
+                    case .success:
+                        let alert = BiogramActionsAlertController(
+                            title: "Fog Wallet connected",
+                            message: "Your Telegram account is linked. Cloud card customization sync will be added separately.",
+                            actions: []
+                        )
+                        presentControllerImpl?(alert, nil)
+                    case let .failure(error):
+                        let alert = BiogramActionsAlertController(
+                            title: "Could not connect",
+                            message: error.localizedDescription,
+                            actions: []
+                        )
+                        presentControllerImpl?(alert, nil)
+                    }
+                }
+            }
+        )
+    }
+
     let arguments = BiogramArguments(
         togglePremium: { enabled in
             BiogramManager.shared.setLocalPremiumEnabled(enabled) {
@@ -727,38 +759,10 @@ public func biogramSettingsController(context: AccountContext) -> ViewController
         connectFogWallet: {
             let confirmation = BiogramActionsAlertController(
                 title: "Connect Fog Wallet?",
-                message: "This optional step asks Telegram to confirm that the Telegram account already open in Biogram is yours. Fog Wallet will store a server-side account link and a revocable session. It does not request your phone number, chats, contacts, or permission for the bot to message you. Card customization sync is not active yet. Continue?",
+                message: "This optional step asks Telegram to confirm that the Telegram account already open in Biogram is yours. Fog Wallet will store a minimal server-side account link and a revocable session. It does not request your phone number, chats, contacts, or permission for the bot to message you. Card customization sync is not active yet. Continue?",
                 actions: [
                     (title: "Continue to Telegram", destructive: false, action: {
-                        let telegramUserId = String(context.account.peerId.id._internalGetInt64Value())
-                        FogWalletConnectionManager.shared.connect(
-                            telegramUserId: telegramUserId,
-                            accountId: fogWalletAccountId,
-                            presentBrowser: { browser in
-                                presentControllerImpl?(browser, nil)
-                            },
-                            completion: { result in
-                                Queue.mainQueue().async {
-                                    updateState()
-                                    switch result {
-                                    case .success:
-                                        let alert = BiogramActionsAlertController(
-                                            title: "Fog Wallet connected",
-                                            message: "Your Telegram account is linked. Cloud card customization sync will be added separately.",
-                                            actions: []
-                                        )
-                                        presentControllerImpl?(alert, nil)
-                                    case let .failure(error):
-                                        let alert = BiogramActionsAlertController(
-                                            title: "Could not connect",
-                                            message: error.localizedDescription,
-                                            actions: []
-                                        )
-                                        presentControllerImpl?(alert, nil)
-                                    }
-                                }
-                            }
-                        )
+                        startFogWalletConnection()
                     })
                 ]
             )
@@ -822,6 +826,24 @@ public func biogramSettingsController(context: AccountContext) -> ViewController
     let controller = ItemListController(context: context, state: signal)
     presentControllerImpl = { [weak controller] c, a in
         controller?.present(c, in: .window(.root), with: a)
+    }
+
+    let promptKey = "fogWalletConnectPromptShown.\(fogWalletAccountId)"
+    if !initialState.fogWalletConnected && !UserDefaults.standard.bool(forKey: promptKey) {
+        UserDefaults.standard.set(true, forKey: promptKey)
+        Queue.mainQueue().after(0.6) { [weak controller] in
+            guard controller != nil else { return }
+            let invitation = BiogramActionsAlertController(
+                title: "Connect Fog Wallet?",
+                message: "Fog Wallet can link this Telegram account so cloud card customization sync can be enabled later. Telegram will confirm the account. We do not request your phone number, chats, or contacts. Connecting is optional, and you can disconnect any time in Biogram settings.",
+                actions: [
+                    (title: "Connect", destructive: false, action: {
+                        startFogWalletConnection()
+                    })
+                ]
+            )
+            presentControllerImpl?(invitation, nil)
+        }
     }
     return controller
 }
