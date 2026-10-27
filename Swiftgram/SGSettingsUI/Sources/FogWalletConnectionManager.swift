@@ -85,7 +85,6 @@ public final class FogWalletConnectionManager {
     public static let shared = FogWalletConnectionManager()
 
     private let keychainService = "com.b1o.biogram.fog-wallet"
-    private let sessionLifetime: TimeInterval = 30 * 24 * 60 * 60
     private let flowLifetime: TimeInterval = 10 * 60
     private let session = URLSession(configuration: .ephemeral)
 
@@ -126,7 +125,6 @@ public final class FogWalletConnectionManager {
 
                 DispatchQueue.main.async {
                     var completed = false
-                    var browser: FogWalletAuthBrowserController?
                     let finish: (Result<Void, Error>) -> Void = { result in
                         guard !completed else { return }
                         completed = true
@@ -136,7 +134,6 @@ public final class FogWalletConnectionManager {
                     let controller = FogWalletAuthBrowserController(url: url) {
                         finish(.failure(FogWalletConnectionError.authorizationCancelled))
                     }
-                    browser = controller
                     presentBrowser(controller)
 
                     self.poll(
@@ -150,7 +147,6 @@ public final class FogWalletConnectionManager {
                                 controller.closeAfterCompletion()
                             }
                             finish(result)
-                            _ = browser
                         }
                     )
                 }
@@ -245,7 +241,11 @@ public final class FogWalletConnectionManager {
         accessToken: String?,
         completion: @escaping (Result<[String: Any], Error>) -> Void
     ) {
-        var request = URLRequest(url: fogWalletBaseURL.appendingPathComponent(path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))))
+        guard let requestURL = URL(string: fogWalletBaseURL.absoluteString + path) else {
+            completion(.failure(FogWalletConnectionError.invalidResponse))
+            return
+        }
+        var request = URLRequest(url: requestURL)
         request.httpMethod = "POST"
         request.timeoutInterval = 15
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -280,6 +280,10 @@ public final class FogWalletConnectionManager {
             }
             if httpResponse.statusCode == 410 {
                 completion(.success(["status": "expired"]))
+                return
+            }
+            if payload["status"] as? String == "failed" {
+                completion(.success(payload))
                 return
             }
             guard (200..<300).contains(httpResponse.statusCode) else {
