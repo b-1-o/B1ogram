@@ -30,7 +30,7 @@ The Worker name and D1 binding in `wrangler.jsonc` point to the existing Fog Wal
 
 ## Database migrations
 
-The initial schema was applied to the remote database when this folder was added. The migration uses `IF NOT EXISTS` for schema objects and replaces the transfer-acceptance trigger with the stricter rule that only a pending transfer may be accepted.
+The live schema was created through the Cloudflare API before this migration file was committed, and the deployed database's transfer-acceptance trigger has also been tightened directly. Wrangler has not yet recorded this migration in its migration history. The migration uses `IF NOT EXISTS` for schema objects and replaces the transfer-acceptance trigger with the stricter rule that only a pending transfer may be accepted.
 
 To sync Wrangler's migration history and apply this migration to the existing remote database:
 
