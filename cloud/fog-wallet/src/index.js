@@ -76,29 +76,13 @@ async function getTelegramJwks(forceRefresh = false) {
     return jwksMemoryCache;
   }
 
-  const cacheKey = new Request(TELEGRAM_JWKS_URL);
-  const edgeCache = globalThis.caches?.default;
-
-  if (!forceRefresh && edgeCache) {
-    try {
-      const cached = await edgeCache.match(cacheKey);
-      if (cached) {
-        const value = await cached.json();
-        if (Array.isArray(value?.keys)) {
-          jwksMemoryCache = value;
-          jwksMemoryExpiresAt = now + 5 * 60 * 1000;
-          return value;
-        }
-      }
-    } catch {
-      // A cache miss must not prevent authentication.
-    }
-  }
-
   let response;
   try {
     response = await fetch(TELEGRAM_JWKS_URL, {
-      headers: { Accept: "application/json" }
+      headers: {
+        Accept: "application/json",
+        ...(forceRefresh ? { "Cache-Control": "no-cache" } : {})
+      }
     });
   } catch {
     throw new TokenError("telegram_auth_unavailable", 503);
@@ -119,28 +103,11 @@ async function getTelegramJwks(forceRefresh = false) {
     throw new TokenError("telegram_auth_unavailable", 503);
   }
 
+  // Cache only in this isolate; logins are infrequent and no cache binding is required.
   jwksMemoryCache = value;
   jwksMemoryExpiresAt = now + 5 * 60 * 1000;
-
-  if (edgeCache) {
-    try {
-      await edgeCache.put(
-        cacheKey,
-        new Response(JSON.stringify(value), {
-          headers: {
-            "Content-Type": "application/json",
-            "Cache-Control": "public, max-age=3600"
-          }
-        })
-      );
-    } catch {
-      // Runtime memory cache remains available if edge caching is unavailable.
-    }
-  }
-
   return value;
 }
-
 async function verifyTelegramIdToken(idToken, clientId) {
   if (typeof idToken !== "string" || idToken.length < 20 || idToken.length > MAX_ID_TOKEN_LENGTH) {
     throw new TokenError();
@@ -258,24 +225,40 @@ async function readJson(request, maxBytes = 20 * 1024) {
     return { error: json({ error: "request_too_large" }, 413) };
   }
 
-  let raw;
+  if (!request.body) return { error: json({ error: "invalid_json" }, 400) };
+
+  const reader = request.body.getReader();
+  const chunks = [];
+  let totalBytes = 0;
+
   try {
-    raw = await request.text();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > maxBytes) {
+        await reader.cancel();
+        return { error: json({ error: "request_too_large" }, 413) };
+      }
+      chunks.push(value);
+    }
   } catch {
     return { error: json({ error: "invalid_json" }, 400) };
   }
 
-  if (new TextEncoder().encode(raw).byteLength > maxBytes) {
-    return { error: json({ error: "request_too_large" }, 413) };
+  const bytes = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
   }
 
   try {
-    return { value: JSON.parse(raw) };
+    return { value: JSON.parse(new TextDecoder().decode(bytes)) };
   } catch {
     return { error: json({ error: "invalid_json" }, 400) };
   }
 }
-
 async function authenticate(request, env) {
   const authorization = request.headers.get("authorization") || "";
   const match = authorization.match(/^Bearer ([A-Za-z0-9_-]{40,128})$/);
