@@ -49,7 +49,8 @@ The start and status endpoints are designed for native iOS API calls; no browser
 - Session tokens are random opaque values; D1 stores only SHA-256 hashes. Sessions expire after 30 days.
 - Flow IDs are random one-time polling credentials stored by hash. A completed flow can issue a session only once.
 - Disconnect revokes active sessions and disables the public card setting; it does not erase card records, limited-edition proof, or transfer history.
-- This is a first implementation, not yet fully integrated into the iOS UI. Before public launch, add platform-level rate limiting and run end-to-end testing for cancellation, expiry, replay, account mismatch, disconnect, and reconnect.
+- The Biogram settings UI now includes a one-time optional connection invitation, a connect action, and a disconnect action. The UI change is committed in the PR branch but has not been built or device-tested yet.
+- Before public launch, add platform-level rate limiting and run end-to-end testing for cancellation, expiry, replay, account mismatch, disconnect, and reconnect.
 
 ## Deploy
 
