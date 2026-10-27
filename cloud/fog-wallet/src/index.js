@@ -291,7 +291,7 @@ async function startTelegramConnect(request, env) {
 
   try {
     await env.DB.batch([
-      env.DB.prepare("DELETE FROM telegram_oauth_flows WHERE expires_at <= ? OR status <> 'pending'").bind(now),
+      env.DB.prepare("DELETE FROM telegram_oauth_flows WHERE expires_at <= ?").bind(now),
       env.DB.prepare(
         `INSERT INTO telegram_oauth_flows
          (state_hash, flow_id_hash, expected_telegram_id, nonce, code_verifier, status, created_at, expires_at, user_id, error_code, consumed_at)
