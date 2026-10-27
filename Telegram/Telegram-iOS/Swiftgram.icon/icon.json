@@ -37,7 +37,7 @@
               "value" : "none"
             }
           ],
-          "glass" : true,
+          "glass" : false,
           "image-name" : "Biogram.png",
           "name" : "Biogram",
           "opacity-specializations" : [
