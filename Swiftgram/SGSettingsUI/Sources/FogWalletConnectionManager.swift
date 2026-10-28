@@ -228,36 +228,25 @@ public final class FogWalletConnectionManager {
                         completion(result)
                     }
 
-                    // Prefer Telegram's native cross-app authorization when Telegram is installed.
-                    // If that route is unavailable, retain the regular browser-based OIDC fallback.
-                    self.openTelegramCrossApp(authorizationURL: url) { openedTelegram in
-                        DispatchQueue.main.async {
-                            guard !completed else { return }
-
-                            let controller: FogWalletAuthBrowserController?
-                            if openedTelegram {
-                                controller = nil
-                            } else {
-                                let browserController = FogWalletAuthBrowserController(url: url)
-                                controller = browserController
-                                presentBrowser(browserController)
+                    // Use the HTTPS browser redirect for Fog Wallet. The Worker must receive
+                    // Telegram's authorization code at its callback before the D1 account link
+                    // can be completed; the cross-app Telegram route has returned callbacks
+                    // without a code in this integration.
+                    let browserController = FogWalletAuthBrowserController(url: url)
+                    presentBrowser(browserController)
+                    self.poll(
+                        flowId: flowId,
+                        accountId: accountId,
+                        browser: browserController,
+                        startedAt: Date(),
+                        attempt: 0,
+                        finish: { result in
+                            if case .success = result {
+                                browserController.closeAfterCompletion()
                             }
-
-                            self.poll(
-                                flowId: flowId,
-                                accountId: accountId,
-                                browser: controller,
-                                startedAt: Date(),
-                                attempt: 0,
-                                finish: { result in
-                                    if case .success = result {
-                                        controller?.closeAfterCompletion()
-                                    }
-                                    finish(result)
-                                }
-                            )
+                            finish(result)
                         }
-                    }
+                    )
                 }
             }
         }
