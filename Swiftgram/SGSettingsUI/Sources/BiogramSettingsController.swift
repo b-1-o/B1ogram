@@ -941,15 +941,7 @@ private final class FogPremiumCardView: UIControl {
 
     func configure(card: [String: Any]) {
         self.card = card
-        // Collection responses wrap the public design under "design", while catalog
-        // responses are already public-design objects. Only unwrap a dictionary that
-        // contains the actual card title; otherwise the catalog preview loses its art
-        // URL, title and series because "design" is only the visual metadata object.
-        if let nestedDesign = card["design"] as? [String: Any], nestedDesign["title"] != nil {
-            self.design = nestedDesign
-        } else {
-            self.design = card
-        }
+        self.design = card["design"] as? [String: Any] ?? card
         let palette = (self.design["palette"] as? [String]) ?? ["#151517", "#343238", "#C9B79E"]
         let colors = palette.prefix(4).map { fogWalletColor($0).cgColor }
         self.gradient.colors = colors.count >= 2 ? colors : [fogWalletColor("#171719").cgColor, fogWalletColor("#373137").cgColor]

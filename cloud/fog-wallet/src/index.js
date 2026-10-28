@@ -247,7 +247,8 @@ async function verifyIdToken(idToken, clientId, expectedNonce, expectedTelegramI
   const now = Math.floor(Date.now() / 1000);
   const audienceMatches = claims?.aud === clientId ||
     (Array.isArray(claims?.aud) && claims.aud.includes(clientId));
-  const telegramId = claims?.id === undefined ? "" : String(claims.id);
+  const rawTelegramId = claims?.id ?? claims?.sub;
+  const telegramId = rawTelegramId === undefined || rawTelegramId === null ? "" : String(rawTelegramId);
 
   if (
     claims?.iss !== TELEGRAM_ISSUER ||
