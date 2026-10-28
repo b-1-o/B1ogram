@@ -1,85 +1,98 @@
-# Fog Wallet Cloudflare infrastructure
+# Fog Wallet — Worker, cards and Studio
 
-This directory is the source of truth for the Fog Wallet Worker and D1 schema.
+This directory is the source of truth for the Fog Wallet Cloudflare Worker, D1 schema and web-based administration page.
 
-## Cloud resources
+## Current services
 
 - **Worker:** `fog-wallet-api`
-- **D1 database:** `fog-wallet-db`
-- **D1 ID:** `87080a92-8b59-4699-a62f-1719244c2590`
-- **D1 location hint:** WNAM (Western North America)
-- **Read replicas:** disabled to minimize resources for the first release
-- **R2:** not yet enabled; public artwork storage will be added only when account-level R2 access is enabled
+- **D1:** `fog-wallet-db`
+- **Public API:** `https://fog-wallet-api.collab-docs-b1o.workers.dev`
+- **Admin Studio:** `https://fog-wallet-api.collab-docs-b1o.workers.dev/admin`
 
-The database lives in Cloudflare, not inside GitHub. The repository contains configuration and migrations so the schema can be reviewed and reproduced. Never commit Cloudflare API tokens, Telegram Client Secrets, authentication tokens, or private signing keys.
+The card interface is rendered locally in Biogram. The Worker stores designs, compact artwork, card ownership, activation-code hashes, certificate signatures, transfer history and audit events.
 
-## Opt-in Telegram connection
+## Required Worker settings
 
-Fog Wallet connection is separate from the app's existing MTProto sign-in. The user stays signed in to Biogram as usual and explicitly chooses to connect Fog Wallet. The Web OIDC flow does not require Apple's Team ID or a native-app registration in BotFather.
+Keep all credentials out of Git:
 
-Register these exact allowed URLs in BotFather → the selected bot → Login Widget → OpenID:
+- `TELEGRAM_CLIENT_ID` — plain-text Worker variable from BotFather OpenID.
+- `TELEGRAM_CLIENT_SECRET` — Worker secret.
+- `FOG_ADMIN_TOKEN` — random secret of at least 32 characters, used as a Bearer token for Admin Studio.
+- `FOG_CARD_SIGNING_KEY` — random secret of at least 32 characters for HMAC-SHA-256 card certificates.
 
-- **Redirect URL:** `https://fog-wallet-api.collab-docs-b1o.workers.dev/v1/auth/telegram/callback`
-- **Trusted Origin:** `https://fog-wallet-api.collab-docs-b1o.workers.dev`
+Generate two separate random values locally with `openssl rand -hex 32`, then add them as separate secrets in Cloudflare Worker settings. Do not put them in source files, issues, or screenshots. Rotating the signing key requires a key-versioning plan or old card proofs will fail verification.
 
-BotFather will show a Client ID and Client Secret. Configure them on the Worker:
+## Telegram account linking
 
-- **Variable** `TELEGRAM_CLIENT_ID`: the Client ID from BotFather. It is public configuration, but is kept in Worker settings to avoid duplicating values in code.
-- **Secret** `TELEGRAM_CLIENT_SECRET`: the Client Secret from BotFather. Store it only in Cloudflare Worker Secrets. Never place it in the iOS app or GitHub.
+BotFather → selected bot → Login Widget → OpenID must list:
 
-The authorization flow requests `openid profile` so the server can compare Telegram's signed numeric `id` claim to the Telegram account ID currently active in Biogram. The Worker uses only the signed identity subject for the Fog Wallet account and does not persist the returned profile fields. It does not request phone-number access or permission for the bot to send messages.
+- Redirect: `https://fog-wallet-api.collab-docs-b1o.workers.dev/v1/auth/telegram/callback`
+- Trusted origin: `https://fog-wallet-api.collab-docs-b1o.workers.dev`
 
-### API routes
+The OIDC callback writes the signed Telegram numeric ID to `users.telegram_id`. Accounts created before migration 0003 must disconnect and reconnect once.
 
-- `GET /health` — minimal Worker/D1 health check.
-- `POST /v1/connect/telegram/start` — starts a short-lived OIDC connection flow. JSON body: `{"expected_telegram_id":"<current Biogram Telegram user ID>"}`. Returns an authorization URL and a one-time flow ID.
-- `GET /v1/auth/telegram/callback` — Telegram's registered redirect URI. Exchanges the authorization code server-side, validates the ID-token signature/issuer/audience/expiry/nonce/account ID, and marks the flow complete.
-- `POST /v1/connect/telegram/status` — JSON body `{"flow_id":"<flow ID from start>"}`; returns pending/failed or returns a short-lived connection session exactly once after success.
-- `GET /v1/me` — returns the current Fog Wallet user when sent `Authorization: Bearer <access_token>`.
-- `POST /v1/connect/disconnect` — revokes all active Fog Wallet sessions for the connected user and disables their public profile-card setting. It does not delete issued-card ownership or the transfer ledger.
-- All other routes return `404`.
+## API routes
 
-The start and status endpoints are designed for native iOS API calls; no browser JavaScript widget is hosted on this origin. The app should poll status only while the user is actively completing the connection and must stop on completion, cancellation, app backgrounding, or timeout. Store the access token in iOS Keychain, never in logs or URLs.
+### Account linking
+- `GET /health`
+- `POST /v1/connect/telegram/start`
+- `GET /v1/auth/telegram/callback`
+- `POST /v1/connect/telegram/status`
+- `GET /v1/me`
+- `POST /v1/connect/disconnect`
 
-### Security and user consent
+### Cards
+- `GET /v1/cards/catalog` — enabled designs, palette, rarity, print-run count and artwork URL.
+- `GET /v1/cards/collection` — authenticated user's cards.
+- `GET /v1/cards/:id` — owner-only detail with signature verification and issuance events.
+- `POST /v1/cards/claim` — claim an enabled standard design; one copy per design per account.
+- `POST /v1/cards/activate` — redeem a single-use activation code.
+- `POST /v1/cards/feature` — set a card as featured.
+- `POST /v1/cards/transfers`, `POST /v1/cards/transfers/accept`, `POST /v1/cards/transfers/cancel` — ownership-transfer workflow.
+- `GET /v1/cards/verify?serial=FG-YYYY-XXXXXXXX` — public certificate verification.
+- `GET /v1/assets/:designId` — compact artwork.
 
-- The flow uses random state, nonce, and PKCE S256. A transaction expires after ten minutes.
-- The Worker exchanges the OAuth authorization code using the Client Secret stored only as a Cloudflare Secret.
-- The Worker pins JWT verification to RS256 and validates the issuer, audience, expiry, issue time, nonce, and signed Telegram account ID.
-- Session tokens are random opaque values; D1 stores only SHA-256 hashes. Sessions expire after 30 days.
-- Flow IDs are random one-time polling credentials stored by hash. A completed flow can issue a session only once.
-- Disconnect revokes active sessions and disables the public card setting; it does not erase card records, limited-edition proof, or transfer history.
-- The Biogram settings UI now includes a one-time optional connection invitation, a connect action, and a disconnect action. The UI change is committed in the PR branch but has not been built or device-tested yet.
-- Before public launch, add platform-level rate limiting and run end-to-end testing for cancellation, expiry, replay, account mismatch, disconnect, and reconnect.
+Authenticated API requests use `Authorization: Bearer <access_token>`. The token is held in iOS Keychain; D1 stores only a token hash. Admin Studio compresses artwork in the browser and limits it to 320 KiB, stored in D1 to avoid requiring R2.
 
-## Deploy
+### Admin Studio
+Open `/admin` and use the `FOG_ADMIN_TOKEN` as a Bearer token:
+- `GET /v1/admin/overview`
+- `GET/POST /v1/admin/designs`; `PATCH /v1/admin/designs/:id`
+- `POST/PUT /v1/admin/designs/:id/art`
+- `POST /v1/admin/designs/:id/codes` — generate up to 100 limited-edition codes per request.
+- `GET /v1/admin/codes`; `POST /v1/admin/codes/:id/revoke`
+- `GET /v1/admin/cards?q=...`
+- `POST /v1/admin/cards/assign` and `POST /v1/admin/cards/transfer`
+- `GET /v1/admin/users?telegram_id=...`
+- `GET /v1/admin/activity`
 
-Use Node.js and Wrangler from the repository environment:
+Raw activation codes are displayed once and never saved in D1. Limited designs reserve one edition slot per activation-code row; a database trigger enforces the cap. The card back displays a masked proof, not the activation code. The full certificate is HMAC-SHA-256 signed by the Worker.
 
-```sh
-npx wrangler login
-npx wrangler deploy --config cloud/fog-wallet/wrangler.jsonc
-```
+## Migration and deployment
 
-The Worker name and D1 binding in `wrangler.jsonc` point to the existing Fog Wallet resources.
-
-## Database migrations
-
-- `0001_initial.sql` defines the card schema.
-- `0002_oauth_linking.sql` defines short-lived OIDC flows and revocable sessions.
-
-The initial live schema was created through the Cloudflare API before the migration file was committed, and the transfer-acceptance trigger was tightened directly in D1. Wrangler has not yet recorded these live schema changes in its migration history. Review migration SQL before running it on an existing remote database.
+Review and back up the live D1 database before applying migrations; some initial live tables were originally created manually.
 
 ```sh
 npx wrangler d1 migrations apply fog-wallet-db --remote --config cloud/fog-wallet/wrangler.jsonc
+npx wrangler deploy --config cloud/fog-wallet/wrangler.jsonc
 ```
 
-Do not use this configuration with a different database ID unless you intend to initialize another Fog Wallet environment.
+First-card release order:
+1. Set `FOG_ADMIN_TOKEN` and `FOG_CARD_SIGNING_KEY` as Worker secrets.
+2. Apply migration `0003_cards_platform.sql` exactly once to the existing D1.
+3. Deploy the updated Worker and the `src/cards.js` and `src/admin.js` files.
+4. Open `/admin`, create a design and upload artwork.
+5. Have the intended owner reconnect Fog Wallet once so their numeric Telegram ID is populated.
+6. Issue the first real card from Studio to that linked numeric Telegram ID.
+7. Install the latest Biogram build and test catalogue, claim, activation, serial/proof, disconnect and reconnect.
 
-## Design principles
+Do not manually insert a fake owned card as a seed. A card becomes real only after the service creates its ownership row and signed receipt. Run Worker/schema checks first, then dispatch one complete release-arm64 build after the code is grouped.
 
-- No long-running server or background polling loops.
-- D1 stores compact relational records; card rendering and animation run locally in iOS.
-- Public immutable art assets may be hosted separately in R2 after it is enabled.
-- Private API responses remain uncached.
-- Every privileged operation is authorized inside the Worker; hiding a UI control is not access control.
+## Security
+- Opt-in account link; no request for chats, contacts, or phone number.
+- OIDC uses state, nonce, PKCE S256, server-side code exchange and RS256 ID-token verification.
+- API sessions expire after 30 days. Disconnect revokes sessions but keeps card ownership and transfer history.
+- Activation attempts are limited to 10 failures per account per 10-minute bucket.
+- Admin routes require the admin Bearer token; the Studio stores it in sessionStorage for the current browser tab only.
+- A masked proof is a display element, not a transfer credential. Certificate verification is performed server-side.
+- Before wider release, test concurrency, replay, expiration, account mismatch, access control and backup/restore.

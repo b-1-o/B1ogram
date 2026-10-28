@@ -1,4 +1,6 @@
-const API_VERSION = "0.3.0";
+import { handleCardApi } from "./cards.js";
+
+const API_VERSION = "0.4.0";
 const TELEGRAM_ISSUER = "https://oauth.telegram.org";
 const TELEGRAM_AUTH_URL = "https://oauth.telegram.org/auth";
 const TELEGRAM_TOKEN_URL = "https://oauth.telegram.org/token";
@@ -269,7 +271,7 @@ async function verifyIdToken(idToken, clientId, expectedNonce, expectedTelegramI
     throw new AuthFlowError("telegram_account_mismatch");
   }
 
-  return { sub: claims.sub };
+  return { sub: claims.sub, telegramId };
 }
 
 async function startTelegramConnect(request, env) {
@@ -429,11 +431,11 @@ async function telegramCallback(request, env) {
   let user;
   try {
     user = await env.DB.prepare(
-      `INSERT INTO users (id, telegram_sub, username, display_name, created_at, updated_at)
-       VALUES (?, ?, NULL, NULL, ?, ?)
-       ON CONFLICT(telegram_sub) DO UPDATE SET updated_at = excluded.updated_at
+      `INSERT INTO users (id, telegram_sub, telegram_id, username, display_name, created_at, updated_at)
+       VALUES (?, ?, ?, NULL, NULL, ?, ?)
+       ON CONFLICT(telegram_sub) DO UPDATE SET telegram_id = excluded.telegram_id, updated_at = excluded.updated_at
        RETURNING id, telegram_sub`
-    ).bind(crypto.randomUUID(), identity.sub, completedAt, completedAt).first();
+    ).bind(crypto.randomUUID(), identity.sub, identity.telegramId, completedAt, completedAt).first();
   } catch {
     await markFlowFailed(env, stateHash, "database_unavailable");
     return htmlPage("Connection unavailable", "Fog Wallet could not save the connection. Return to Biogram and try again.", 503);
@@ -532,6 +534,7 @@ async function connectStatus(request, env) {
     user: {
       id: user.id,
       telegram_sub: user.telegram_sub,
+      telegram_id: user.telegram_id,
       username: user.username,
       display_name: user.display_name
     }
@@ -545,7 +548,7 @@ async function authenticate(request, env) {
 
   const now = Math.floor(Date.now() / 1000);
   return env.DB.prepare(
-    `SELECT u.id, u.telegram_sub, u.username, u.display_name, s.expires_at
+    `SELECT u.id, u.telegram_sub, u.telegram_id, u.username, u.display_name, s.expires_at
      FROM user_sessions s
      JOIN users u ON u.id = s.user_id
      WHERE s.token_hash = ? AND s.revoked_at IS NULL AND s.expires_at > ?
@@ -639,6 +642,15 @@ export default {
       if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405);
       return disconnect(request, env);
     }
+
+    const cardResponse = await handleCardApi(request, env, url, {
+      json,
+      readJson,
+      sha256Hex,
+      randomToken,
+      authenticate
+    });
+    if (cardResponse) return cardResponse;
 
     return json({ error: "not_found" }, 404);
   }
