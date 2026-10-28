@@ -347,7 +347,7 @@ async function createUserTransfer(request, env, tools, user) {
   const recipientTelegramId = String(parsed.value?.recipient_telegram_id || "");
   if (!/^\d{1,24}$/.test(recipientTelegramId)) return tools.json({ error: "recipient_telegram_id_required" }, 400);
   const recipient = await env.DB.prepare("SELECT id FROM users WHERE telegram_id = ? LIMIT 1").bind(recipientTelegramId).first();
-  if (!recipient) return tools.json({ error: "recipient_not_connected" }, 404);
+  if (!recipient) return tools.json({ error: "recipient_not_connected" }, 409);
   if (recipient.id === user.id) return tools.json({ error: "cannot_transfer_to_self" }, 400);
   const card = await env.DB.prepare("SELECT id, serial FROM cards WHERE id = ? AND owner_user_id = ? LIMIT 1").bind(cardId, user.id).first();
   if (!card) return tools.json({ error: "card_not_found" }, 404);
@@ -544,7 +544,7 @@ async function adminApi(request, env, url, tools) {
     let intendedUserId = null;
     if (issuedTo) {
       const recipient = await findUserByRecipient(env.DB, issuedTo, "id");
-      if (!recipient) return tools.json({ error: "recipient_not_connected" }, 404);
+      if (!recipient) return tools.json({ error: "recipient_not_connected" }, 409);
       intendedUserId = recipient.id;
     }
 
@@ -603,7 +603,7 @@ async function adminApi(request, env, url, tools) {
       const designRow = await getDesign(env.DB, designId);
       const user = await findUserByRecipient(env.DB, recipientInput, "id, telegram_sub, telegram_id, username");
       if (!designRow) return tools.json({ error: "design_not_found" }, 404);
-      if (!user) return tools.json({ error: "recipient_not_connected" }, 404);
+      if (!user) return tools.json({ error: "recipient_not_connected" }, 409);
       const card = await issueCardToUser(env.DB, env, tools, publicDesign(designRow), user, "admin_assignment");
       await writeAudit(env.DB, "card_assigned", { serial: card.serial, design_id: designId, recipient: user.username ? "@" + user.username : user.telegram_id });
       return tools.json({ card }, 201);
