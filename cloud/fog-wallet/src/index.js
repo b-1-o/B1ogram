@@ -382,7 +382,7 @@ async function telegramCallback(request, env) {
     const detail = description ? " Details: " + description : "";
     return htmlPage("Telegram sign-in failed", "Telegram returned error: " + normalizedProviderError + "." + detail + " Return to Biogram and retry. If this repeats, verify the Fog Wallet callback URL in Telegram Login settings.");
   }
-  if (code.length < 1 || code.length > 4096 || /[\\r\\n]/.test(code)) {
+  if (code.length < 1 || code.length > 4096 || /[\r\n]/.test(code)) {
     const errorCode = code.length < 1 ? "authorization_code_missing" : "invalid_authorization_code";
     await markFlowFailed(env, stateHash, errorCode);
     return htmlPage("Telegram sign-in did not finish", code.length < 1
@@ -542,7 +542,7 @@ async function connectStatus(request, env) {
   let user;
   try {
     user = await env.DB.prepare(
-      "SELECT id, telegram_sub, username, display_name FROM users WHERE id = ? LIMIT 1"
+      "SELECT id, telegram_sub, telegram_id, username, display_name FROM users WHERE id = ? LIMIT 1"
     ).bind(insertedRows[0].user_id).first();
   } catch {
     return json({ error: "database_unavailable" }, 503);
