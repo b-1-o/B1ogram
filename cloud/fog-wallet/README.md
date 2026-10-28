@@ -29,7 +29,7 @@ BotFather → selected bot → Login Widget → OpenID must list:
 - Redirect: `https://fog-wallet-api.collab-docs-b1o.workers.dev/v1/auth/telegram/callback`
 - Trusted origin: `https://fog-wallet-api.collab-docs-b1o.workers.dev`
 
-The OIDC callback writes the signed Telegram numeric ID to `users.telegram_id`. Accounts created before migration 0003 must disconnect and reconnect once.
+The OIDC callback verifies the Telegram OIDC identity and stores its signed Telegram identifier plus the available username/display name. Biogram still needs a compatible native build and a successful Connect flow before a user appears in the linked-account table.
 
 ## API routes
 
@@ -52,7 +52,7 @@ The OIDC callback writes the signed Telegram numeric ID to `users.telegram_id`. 
 - `GET /v1/cards/verify?serial=FG-YYYY-XXXXXXXX` — public certificate verification.
 - `GET /v1/assets/:designId` — compact artwork.
 
-Authenticated API requests use `Authorization: Bearer <access_token>`. The token is held in iOS Keychain; D1 stores only a token hash. Admin Studio compresses artwork in the browser and limits it to 320 KiB, stored in D1 to avoid requiring R2.
+Authenticated API requests use `Authorization: Bearer <access_token>`. The token is held in iOS Keychain; D1 stores only a token hash. In Admin Studio, the new-design artwork editor previews a portrait 2:3 crop, supports dragging, zoom and reset, then uploads the final WebP crop compressed to at most 320 KiB. Artwork remains in D1; no external asset host is required.
 
 ### Admin Studio
 Open `/admin` and use the `FOG_ADMIN_TOKEN` as a Bearer token:
@@ -63,7 +63,7 @@ Open `/admin` and use the `FOG_ADMIN_TOKEN` as a Bearer token:
 - `GET /v1/admin/codes`; `POST /v1/admin/codes/:id/revoke`
 - `GET /v1/admin/cards?q=...`
 - `POST /v1/admin/cards/assign` and `POST /v1/admin/cards/transfer`
-- `GET /v1/admin/users?telegram_id=...`
+- `GET /v1/admin/users?identifier=...` — accepts `@username` or a numeric Telegram ID; the legacy `telegram_id` query parameter remains supported.
 - `GET /v1/admin/activity`
 
 Raw activation codes are displayed once and never saved in D1. Limited designs reserve one edition slot per activation-code row; database triggers enforce the cap and one standard copy per user/design, including concurrent requests and ownership transfers. The card back displays a masked proof, not the activation code. The full certificate is HMAC-SHA-256 signed by the Worker.
@@ -82,8 +82,8 @@ First-card release order:
 2. Apply migration `0003_cards_platform.sql` exactly once to the existing D1.
 3. Deploy the updated Worker and the `src/cards.js` and `src/admin.js` files.
 4. Open `/admin`, create a design and upload artwork.
-5. Have the intended owner reconnect Fog Wallet once so their numeric Telegram ID is populated.
-6. Issue the first real card from Studio to that linked numeric Telegram ID.
+5. Have the intended owner install a compatible Biogram build and complete Fog Wallet → Connect through Telegram. Verify the linked account in Studio using `@username`; a numeric ID is also accepted when needed.
+6. Issue the first real card from Studio to that linked `@username`. A username lookup cannot replace the required successful Fog Wallet connection.
 7. Install the latest Biogram build and test catalogue, claim, activation, serial/proof, disconnect and reconnect.
 
 Do not manually insert a fake owned card as a seed. A card becomes real only after the service creates its ownership row and signed receipt. Run Worker/schema checks first, then dispatch one complete release-arm64 build after the code is grouped.
