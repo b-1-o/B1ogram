@@ -621,14 +621,14 @@ async function adminApi(request, env, url, tools) {
       const card = await env.DB.prepare("SELECT id, serial, owner_user_id FROM cards WHERE serial=? LIMIT 1").bind(serial).first();
       const recipient = await findUserByRecipient(env.DB, recipientInput, "id, telegram_id, username");
       if (!card) return tools.json({ error: "card_not_found" }, 404);
-      if (!recipient) return tools.json({ error: "recipient_not_connected" }, 404);
+      if (!recipient) return tools.json({ error: "recipient_not_connected" }, 409);
       if (recipient.id === card.owner_user_id) return tools.json({ error: "already_owned_by_recipient" }, 409);
       const nowTs = now, transferId = crypto.randomUUID(), senderId = card.owner_user_id;
       await env.DB.batch([
         env.DB.prepare("INSERT INTO card_transfers (id, card_id, sender_user_id, recipient_user_id, token_hash, status, created_at, expires_at, accepted_at, cancelled_at) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, NULL, NULL)").bind(transferId, card.id, senderId, recipient.id, await tools.sha256Hex("admin:" + tools.randomToken()), nowTs, nowTs + 86400),
         env.DB.prepare("UPDATE card_transfers SET status='accepted', accepted_at=? WHERE id=? AND status='pending'").bind(nowTs, transferId),
         env.DB.prepare("UPDATE cards SET owner_user_id=?, updated_at=? WHERE id=? AND owner_user_id=? AND EXISTS(SELECT 1 FROM card_transfers WHERE id=? AND status='accepted')").bind(recipient.id, nowTs, card.id, senderId, transferId),
-        env.DB.prepare("INSERT INTO card_events (id, card_id, actor_user_id, event_type, metadata_json, created_at) VALUES (?, ?, ?, 'transfer_created', ?, ?)").bind(crypto.randomUUID(), card.id, senderId, JSON.stringify({ admin: true, recipient_telegram_id: telegramId }), nowTs),
+        env.DB.prepare("INSERT INTO card_events (id, card_id, actor_user_id, event_type, metadata_json, created_at) VALUES (?, ?, ?, 'transfer_created', ?, ?)").bind(crypto.randomUUID(), card.id, senderId, JSON.stringify({ admin: true, recipient_telegram_id: recipient.telegram_id }), nowTs),
         env.DB.prepare("INSERT INTO card_events (id, card_id, actor_user_id, event_type, metadata_json, created_at) VALUES (?, ?, ?, 'transfer_accepted', ?, ?)").bind(crypto.randomUUID(), card.id, recipient.id, JSON.stringify({ admin: true }), nowTs)
       ]);
       await writeAudit(env.DB, "card_transferred", { serial, recipient: recipient.username ? "@" + recipient.username : recipient.telegram_id });
