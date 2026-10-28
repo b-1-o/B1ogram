@@ -1226,7 +1226,21 @@ private final class FogWalletCardsViewController: ViewController {
             cardView.widthAnchor.constraint(equalToConstant: 222),
             cardView.heightAnchor.constraint(equalToConstant: 332)
         ])
+        let cardIndex = self.cards.firstIndex { ($0["id"] as? String) == (card["id"] as? String) } ?? 0
+        centering.alpha = 0
+        centering.transform = CGAffineTransform(scaleX: 0.94, y: 0.94).translatedBy(x: 0, y: 10)
         self.contentStack.addArrangedSubview(centering)
+        UIView.animate(
+            withDuration: 0.62,
+            delay: Double(min(cardIndex, 6)) * 0.055,
+            usingSpringWithDamping: 0.84,
+            initialSpringVelocity: 0.35,
+            options: [.beginFromCurrentState, .allowUserInteraction],
+            animations: {
+                centering.alpha = 1
+                centering.transform = .identity
+            }
+        )
         let issued = (card["issued_at"] as? NSNumber)?.doubleValue ?? 0
         let date = DateFormatter()
         date.dateStyle = .medium
@@ -1267,7 +1281,21 @@ private final class FogWalletCardsViewController: ViewController {
             }
         }
         row.addArrangedSubview(details)
+        let designIndex = self.designs.firstIndex { ($0["id"] as? String) == (design["id"] as? String) } ?? 0
+        row.alpha = 0
+        row.transform = CGAffineTransform(scaleX: 0.97, y: 0.97).translatedBy(x: 0, y: 7)
         self.contentStack.addArrangedSubview(row)
+        UIView.animate(
+            withDuration: 0.52,
+            delay: Double(min(designIndex, 6)) * 0.04,
+            usingSpringWithDamping: 0.88,
+            initialSpringVelocity: 0.25,
+            options: [.beginFromCurrentState, .allowUserInteraction],
+            animations: {
+                row.alpha = 1
+                row.transform = .identity
+            }
+        )
         let separator = UIView()
         separator.backgroundColor = UIColor.white.withAlphaComponent(0.07)
         separator.heightAnchor.constraint(equalToConstant: 1).isActive = true
