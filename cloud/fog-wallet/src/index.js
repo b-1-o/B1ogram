@@ -628,6 +628,10 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
 
+    if (path === "/favicon.ico") {
+      return new Response(null, { status: 204, headers: { "Cache-Control": "public, max-age=86400", "X-Content-Type-Options": "nosniff" } });
+    }
+
     if (path === "/health") {
       if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405);
       try {
