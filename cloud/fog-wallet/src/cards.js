@@ -431,6 +431,21 @@ async function readAsset(request, env, tools, id) {
     }});
   } catch { return tools.json({ error: "asset_corrupt" }, 500); }
 }
+function normalizeRecipientIdentifier(value) {
+  const raw = String(value ?? "").trim();
+  if (/^\d{1,24}$/.test(raw)) return { type: "id", value: raw };
+  const username = raw.replace(/^@/, "").trim();
+  if (/^[A-Za-z0-9_]{1,64}$/.test(username)) return { type: "username", value: username.toLowerCase() };
+  return null;
+}
+async function findUserByRecipient(db, value, columns = "id, telegram_sub, telegram_id, username, display_name, created_at") {
+  const identifier = normalizeRecipientIdentifier(value);
+  if (!identifier) return null;
+  if (identifier.type === "id") {
+    return db.prepare("SELECT " + columns + " FROM users WHERE telegram_id = ? LIMIT 1").bind(identifier.value).first();
+  }
+  return db.prepare("SELECT " + columns + " FROM users WHERE LOWER(username) = ? LIMIT 1").bind(identifier.value).first();
+}
 async function adminApi(request, env, url, tools) {
   if (!await isAdmin(request, env, tools)) return tools.json({ error: "admin_unauthorized" }, 401);
   const path = url.pathname, method = request.method, now = Math.floor(Date.now() / 1000);
@@ -525,15 +540,14 @@ async function adminApi(request, env, url, tools) {
     try { design = await getDesign(env.DB, id, true); } catch { return tools.json({ error: "database_unavailable" }, 503); }
     if (!design || Number(design.enabled) !== 1) return tools.json({ error: "design_not_enabled" }, 404);
     if (design.kind !== "limited") return tools.json({ error: "activation_codes_require_limited_design" }, 409);
-    const issuedTo = String(parsed.value?.telegram_id || "");
+    const issuedTo = String(parsed.value?.recipient ?? parsed.value?.telegram_id ?? "");
     let intendedUserId = null;
     if (issuedTo) {
-      if (!/^\d{1,24}$/.test(issuedTo)) return tools.json({ error: "invalid_telegram_id" }, 400);
-      const recipient = await env.DB.prepare("SELECT id FROM users WHERE telegram_id=? LIMIT 1").bind(issuedTo).first();
+      const recipient = await findUserByRecipient(env.DB, issuedTo, "id");
       if (!recipient) return tools.json({ error: "recipient_not_connected" }, 404);
       intendedUserId = recipient.id;
     }
-    const generated = [], statements = [];
+
     for (let i = 0; i < count; i++) {
       const code = newActivationCode();
       generated.push(code);
@@ -583,15 +597,15 @@ async function adminApi(request, env, url, tools) {
   if (path === "/v1/admin/cards/assign" && method === "POST") {
     const parsed = await tools.readJson(request, 8 * 1024);
     if (parsed.error) return parsed.error;
-    const designId = String(parsed.value?.design_id || ""), telegramId = String(parsed.value?.telegram_id || "");
-    if (!/^\d{1,24}$/.test(telegramId)) return tools.json({ error: "telegram_id_required" }, 400);
+    const designId = String(parsed.value?.design_id || ""), recipientInput = String(parsed.value?.recipient ?? parsed.value?.telegram_id ?? "");
+    if (!normalizeRecipientIdentifier(recipientInput)) return tools.json({ error: "recipient_username_or_telegram_id_required" }, 400);
     try {
       const designRow = await getDesign(env.DB, designId);
-      const user = await env.DB.prepare("SELECT id, telegram_sub, telegram_id FROM users WHERE telegram_id=? LIMIT 1").bind(telegramId).first();
+      const user = await findUserByRecipient(env.DB, recipientInput, "id, telegram_sub, telegram_id, username");
       if (!designRow) return tools.json({ error: "design_not_found" }, 404);
       if (!user) return tools.json({ error: "recipient_not_connected" }, 404);
       const card = await issueCardToUser(env.DB, env, tools, publicDesign(designRow), user, "admin_assignment");
-      await writeAudit(env.DB, "card_assigned", { serial: card.serial, design_id: designId, telegram_id: telegramId });
+      await writeAudit(env.DB, "card_assigned", { serial: card.serial, design_id: designId, recipient: user.username ? "@" + user.username : user.telegram_id });
       return tools.json({ card }, 201);
     } catch (error) {
       const message = error?.message === "card_signing_key_not_configured" ? error.message : "card_issue_failed";
@@ -601,11 +615,11 @@ async function adminApi(request, env, url, tools) {
   if (path === "/v1/admin/cards/transfer" && method === "POST") {
     const parsed = await tools.readJson(request, 8 * 1024);
     if (parsed.error) return parsed.error;
-    const serial = String(parsed.value?.serial || "").trim().toUpperCase(), telegramId = String(parsed.value?.telegram_id || "");
-    if (!serial || !/^\d{1,24}$/.test(telegramId)) return tools.json({ error: "serial_and_telegram_id_required" }, 400);
+    const serial = String(parsed.value?.serial || "").trim().toUpperCase(), recipientInput = String(parsed.value?.recipient ?? parsed.value?.telegram_id ?? "");
+    if (!serial || !normalizeRecipientIdentifier(recipientInput)) return tools.json({ error: "serial_and_recipient_required" }, 400);
     try {
       const card = await env.DB.prepare("SELECT id, serial, owner_user_id FROM cards WHERE serial=? LIMIT 1").bind(serial).first();
-      const recipient = await env.DB.prepare("SELECT id FROM users WHERE telegram_id=? LIMIT 1").bind(telegramId).first();
+      const recipient = await findUserByRecipient(env.DB, recipientInput, "id, telegram_id, username");
       if (!card) return tools.json({ error: "card_not_found" }, 404);
       if (!recipient) return tools.json({ error: "recipient_not_connected" }, 404);
       if (recipient.id === card.owner_user_id) return tools.json({ error: "already_owned_by_recipient" }, 409);
@@ -617,15 +631,15 @@ async function adminApi(request, env, url, tools) {
         env.DB.prepare("INSERT INTO card_events (id, card_id, actor_user_id, event_type, metadata_json, created_at) VALUES (?, ?, ?, 'transfer_created', ?, ?)").bind(crypto.randomUUID(), card.id, senderId, JSON.stringify({ admin: true, recipient_telegram_id: telegramId }), nowTs),
         env.DB.prepare("INSERT INTO card_events (id, card_id, actor_user_id, event_type, metadata_json, created_at) VALUES (?, ?, ?, 'transfer_accepted', ?, ?)").bind(crypto.randomUUID(), card.id, recipient.id, JSON.stringify({ admin: true }), nowTs)
       ]);
-      await writeAudit(env.DB, "card_transferred", { serial, recipient_telegram_id: telegramId });
-      return tools.json({ ok: true, serial, recipient_telegram_id: telegramId });
+      await writeAudit(env.DB, "card_transferred", { serial, recipient: recipient.username ? "@" + recipient.username : recipient.telegram_id });
+      return tools.json({ ok: true, serial, recipient: recipient.username ? "@" + recipient.username : recipient.telegram_id });
     } catch { return tools.json({ error: "card_transfer_failed_or_pending_transfer_exists" }, 409); }
   }
   if (path === "/v1/admin/users" && method === "GET") {
-    const telegramId = (url.searchParams.get("telegram_id") || "").trim();
-    if (!/^\d{1,24}$/.test(telegramId)) return tools.json({ users: [] });
+    const identifier = (url.searchParams.get("identifier") || url.searchParams.get("telegram_id") || "").trim();
+    if (!normalizeRecipientIdentifier(identifier)) return tools.json({ users: [] });
     try {
-      const user = await env.DB.prepare("SELECT id, telegram_id, username, created_at FROM users WHERE telegram_id=? LIMIT 1").bind(telegramId).first();
+      const user = await findUserByRecipient(env.DB, identifier, "id, telegram_id, username, display_name, created_at");
       return tools.json({ users: user ? [user] : [] });
     } catch { return tools.json({ error: "database_unavailable" }, 503); }
   }

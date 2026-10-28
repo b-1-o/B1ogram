@@ -272,7 +272,12 @@ async function verifyIdToken(idToken, clientId, expectedNonce, expectedTelegramI
     throw new AuthFlowError("telegram_account_mismatch");
   }
 
-  return { sub: claims.sub, telegramId };
+  const rawUsername = typeof claims?.preferred_username === "string" ? claims.preferred_username.trim().replace(/^@/, "") : "";
+  const username = /^[A-Za-z0-9_]{1,64}$/.test(rawUsername) ? rawUsername : null;
+  const rawDisplayName = typeof claims?.name === "string" ? claims.name.trim() :
+    [claims?.given_name, claims?.family_name].filter((part) => typeof part === "string" && part.trim()).join(" ");
+  const displayName = rawDisplayName ? rawDisplayName.slice(0, 120) : null;
+  return { sub: claims.sub, telegramId, username, displayName };
 }
 
 async function startTelegramConnect(request, env) {
@@ -367,12 +372,25 @@ async function telegramCallback(request, env) {
     return htmlPage("Connection expired", "This sign-in request is no longer active. Return to Biogram and start again.", 400);
   }
 
-  if (providerError || code.length < 1 || code.length > 4096 || /[\\r\\n]/.test(code)) {
-    await markFlowFailed(env, stateHash, providerError ? "telegram_login_cancelled" : "invalid_authorization_code");
-    return htmlPage("Connection cancelled", "No Fog Wallet connection was created. You can return to Biogram.");
+  if (providerError) {
+    const normalizedProviderError = /^[A-Za-z0-9_-]{1,48}$/.test(providerError) ? providerError.toLowerCase() : "unknown";
+    const errorCode = normalizedProviderError === "access_denied"
+      ? "telegram_login_cancelled"
+      : "telegram_provider_error_" + normalizedProviderError;
+    await markFlowFailed(env, stateHash, errorCode);
+    const description = (url.searchParams.get("error_description") || "").trim().slice(0, 180);
+    const detail = description ? " Details: " + description : "";
+    return htmlPage("Telegram sign-in failed", "Telegram returned error: " + normalizedProviderError + "." + detail + " Return to Biogram and retry. If this repeats, verify the Fog Wallet callback URL in Telegram Login settings.");
+  }
+  if (code.length < 1 || code.length > 4096 || /[\\r\\n]/.test(code)) {
+    const errorCode = code.length < 1 ? "authorization_code_missing" : "invalid_authorization_code";
+    await markFlowFailed(env, stateHash, errorCode);
+    return htmlPage("Telegram sign-in did not finish", code.length < 1
+      ? "Telegram returned to Fog Wallet without an authorization code. The login redirect may have been interrupted or the callback URL may not match the Telegram Login settings. No account was linked."
+      : "The authorization response was invalid. No account was linked. Return to Biogram and start again.", 400);
   }
 
-  if (!env.TELEGRAM_CLIENT_ID || !env.TELEGRAM_CLIENT_SECRET) {
+ {
     await markFlowFailed(env, stateHash, "telegram_login_not_configured");
     return htmlPage("Connection unavailable", "Fog Wallet sign-in has not been configured yet. Return to Biogram later.", 503);
   }
@@ -433,10 +451,14 @@ async function telegramCallback(request, env) {
   try {
     user = await env.DB.prepare(
       `INSERT INTO users (id, telegram_sub, telegram_id, username, display_name, created_at, updated_at)
-       VALUES (?, ?, ?, NULL, NULL, ?, ?)
-       ON CONFLICT(telegram_sub) DO UPDATE SET telegram_id = excluded.telegram_id, updated_at = excluded.updated_at
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(telegram_sub) DO UPDATE SET
+         telegram_id = excluded.telegram_id,
+         username = COALESCE(excluded.username, users.username),
+         display_name = COALESCE(excluded.display_name, users.display_name),
+         updated_at = excluded.updated_at
        RETURNING id, telegram_sub`
-    ).bind(crypto.randomUUID(), identity.sub, identity.telegramId, completedAt, completedAt).first();
+    ).bind(crypto.randomUUID(), identity.sub, identity.telegramId, identity.username, identity.displayName, completedAt, completedAt).first();
   } catch {
     await markFlowFailed(env, stateHash, "database_unavailable");
     return htmlPage("Connection unavailable", "Fog Wallet could not save the connection. Return to Biogram and try again.", 503);

@@ -35,6 +35,18 @@ private enum FogWalletConnectionError: LocalizedError {
             switch code {
             case "telegram_identity_refresh_required":
                 return "Fog Wallet needs a fresh Telegram identity check. Disconnect and reconnect Fog Wallet in Biogram settings."
+            case "authorization_code_missing":
+                return "Telegram returned without an authorization code, so Fog Wallet could not link the account. Check the Telegram Login callback URL configuration."
+            case "invalid_authorization_code":
+                return "Telegram returned an invalid sign-in response. Start Connect again. If it repeats, check the Telegram Login callback URL configuration."
+            case "telegram_login_cancelled":
+                return "Telegram sign-in was cancelled or declined. No Fog Wallet account was linked."
+            case "telegram_account_mismatch":
+                return "Telegram confirmed a different account than the one open in Biogram. Switch to the intended account and try again."
+            case "telegram_token_exchange_failed":
+                return "Telegram accepted the redirect, but Fog Wallet could not complete sign-in. Check the Telegram Login client configuration."
+            case "telegram_auth_failed":
+                return "Telegram identity verification failed. No Fog Wallet account was linked; try Connect again."
             case "card_signing_key_not_configured":
                 return "Card issuing is not ready on the Fog Wallet server yet."
             case "activation_code_required":
@@ -388,7 +400,8 @@ public final class FogWalletConnectionManager {
                             finish(.failure(FogWalletConnectionError.authorizationExpired))
                         case "failed":
                             browser?.closeAfterCompletion()
-                            finish(.failure(FogWalletConnectionError.serverRejected))
+                            let code = payload["error"] as? String ?? "telegram_auth_failed"
+                            finish(.failure(FogWalletConnectionError.requestFailed(code)))
                         default:
                             self.poll(flowId: flowId, accountId: accountId, browser: browser, startedAt: startedAt, attempt: attempt + 1, finish: finish)
                         }
