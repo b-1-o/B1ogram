@@ -129,22 +129,36 @@ public final class FogWalletConnectionManager {
                         completion(result)
                     }
 
-                    let controller = FogWalletAuthBrowserController(url: url)
-                    presentBrowser(controller)
+                    // Prefer Telegram's native cross-app authorization when Telegram is installed.
+                    // If that route is unavailable, retain the regular browser-based OIDC fallback.
+                    self.openTelegramCrossApp(authorizationURL: url) { openedTelegram in
+                        DispatchQueue.main.async {
+                            guard !completed else { return }
 
-                    self.poll(
-                        flowId: flowId,
-                        accountId: accountId,
-                        browser: controller,
-                        startedAt: Date(),
-                        attempt: 0,
-                        finish: { result in
-                            if case .success = result {
-                                controller.closeAfterCompletion()
+                            let controller: FogWalletAuthBrowserController?
+                            if openedTelegram {
+                                controller = nil
+                            } else {
+                                let browserController = FogWalletAuthBrowserController(url: url)
+                                controller = browserController
+                                presentBrowser(browserController)
                             }
-                            finish(result)
+
+                            self.poll(
+                                flowId: flowId,
+                                accountId: accountId,
+                                browser: controller,
+                                startedAt: Date(),
+                                attempt: 0,
+                                finish: { result in
+                                    if case .success = result {
+                                        controller?.closeAfterCompletion()
+                                    }
+                                    finish(result)
+                                }
+                            )
                         }
-                    )
+                    }
                 }
             }
         }
@@ -178,34 +192,87 @@ public final class FogWalletConnectionManager {
         }
     }
 
+    private func openTelegramCrossApp(authorizationURL: URL, completion: @escaping (Bool) -> Void) {
+        guard
+            let authorizationComponents = URLComponents(url: authorizationURL, resolvingAgainstBaseURL: false),
+            let authorizationItems = authorizationComponents.queryItems,
+            var crossAppComponents = URLComponents(string: "https://oauth.telegram.org/crossapp")
+        else {
+            completion(false)
+            return
+        }
+
+        let forwardedNames: Set<String> = [
+            "client_id", "response_type", "redirect_uri", "scope",
+            "state", "nonce", "code_challenge", "code_challenge_method"
+        ]
+        var queryItems = authorizationItems.filter { forwardedNames.contains($0.name) }
+        queryItems.append(URLQueryItem(name: "ios_sdk", value: "1"))
+        crossAppComponents.queryItems = queryItems
+
+        guard let crossAppURL = crossAppComponents.url else {
+            completion(false)
+            return
+        }
+
+        var request = URLRequest(url: crossAppURL)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 8
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        self.session.dataTask(with: request) { data, response, error in
+            guard
+                error == nil,
+                let httpResponse = response as? HTTPURLResponse,
+                (200..<300).contains(httpResponse.statusCode),
+                let data,
+                let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                let urlString = payload["url"] as? String,
+                let telegramURL = URL(string: urlString),
+                let scheme = telegramURL.scheme?.lowercased(),
+                scheme == "tg" || (scheme == "https" && ["t.me", "telegram.org"].contains(telegramURL.host?.lowercased() ?? ""))
+            else {
+                DispatchQueue.main.async { completion(false) }
+                return
+            }
+
+            DispatchQueue.main.async {
+                UIApplication.shared.open(telegramURL, options: [:]) { opened in
+                    completion(opened)
+                }
+            }
+        }.resume()
+    }
+
     private func poll(
         flowId: String,
         accountId: String,
-        browser: FogWalletAuthBrowserController,
+        browser: FogWalletAuthBrowserController?,
         startedAt: Date,
         attempt: Int,
         finish: @escaping (Result<Void, Error>) -> Void
     ) {
-        guard browser.isFlowActive else { return }
-        if let dismissedAt = browser.userDismissedAt,
+        if let browser, !browser.isFlowActive { return }
+        if let dismissedAt = browser?.userDismissedAt,
            Date().timeIntervalSince(dismissedAt) >= 20 {
-            browser.closeAfterCompletion()
+            browser?.closeAfterCompletion()
             finish(.failure(FogWalletConnectionError.authorizationCancelled))
             return
         }
         if Date().timeIntervalSince(startedAt) >= self.flowLifetime || attempt >= 120 {
-            browser.closeAfterCompletion()
+            browser?.closeAfterCompletion()
             finish(.failure(FogWalletConnectionError.authorizationExpired))
             return
         }
 
         let delay: TimeInterval = attempt < 3 ? 2.0 : 5.0
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self, weak browser] in
-            guard let self, let browser, browser.isFlowActive else { return }
-            self.post(path: "/v1/connect/telegram/status", body: ["flow_id": flowId], accessToken: nil) { [weak self, weak browser] result in
-                guard let self, let browser else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self else { return }
+            if let browser, !browser.isFlowActive { return }
+            self.post(path: "/v1/connect/telegram/status", body: ["flow_id": flowId], accessToken: nil) { [weak self] result in
+                guard let self else { return }
                 DispatchQueue.main.async {
-                    guard browser.isFlowActive else { return }
+                    if let browser, !browser.isFlowActive { return }
                     switch result {
                     case .failure:
                         self.poll(flowId: flowId, accountId: accountId, browser: browser, startedAt: startedAt, attempt: attempt + 1, finish: finish)
@@ -217,23 +284,23 @@ public final class FogWalletConnectionManager {
                             guard let token = payload["access_token"] as? String,
                                   token.range(of: "^[A-Za-z0-9_-]{40,128}$", options: .regularExpression) != nil
                             else {
-                                browser.closeAfterCompletion()
+                                browser?.closeAfterCompletion()
                                 finish(.failure(FogWalletConnectionError.invalidResponse))
                                 return
                             }
                             guard self.saveAccessToken(token, accountId: accountId) else {
                                 self.post(path: "/v1/connect/disconnect", body: [:], accessToken: token) { _ in }
-                                browser.closeAfterCompletion()
+                                browser?.closeAfterCompletion()
                                 finish(.failure(FogWalletConnectionError.keychainFailure))
                                 return
                             }
-                            browser.closeAfterCompletion()
+                            browser?.closeAfterCompletion()
                             finish(.success(()))
                         case "expired", "consumed":
-                            browser.closeAfterCompletion()
+                            browser?.closeAfterCompletion()
                             finish(.failure(FogWalletConnectionError.authorizationExpired))
                         case "failed":
-                            browser.closeAfterCompletion()
+                            browser?.closeAfterCompletion()
                             finish(.failure(FogWalletConnectionError.serverRejected))
                         default:
                             self.poll(flowId: flowId, accountId: accountId, browser: browser, startedAt: startedAt, attempt: attempt + 1, finish: finish)
