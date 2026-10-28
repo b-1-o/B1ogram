@@ -15,6 +15,7 @@ private enum FogWalletConnectionError: LocalizedError {
     case authorizationCancelled
     case keychainFailure
     case serverRejected
+    case requestFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -30,6 +31,27 @@ private enum FogWalletConnectionError: LocalizedError {
             return "iOS could not securely save the Fog Wallet session. Please try again."
         case .serverRejected:
             return "Telegram could not confirm the currently signed-in Biogram account. No connection was created."
+        case let .requestFailed(code):
+            switch code {
+            case "telegram_identity_refresh_required":
+                return "Fog Wallet needs a fresh Telegram identity check. Disconnect and reconnect Fog Wallet in Biogram settings."
+            case "card_signing_key_not_configured":
+                return "Card issuing is not ready on the Fog Wallet server yet."
+            case "activation_code_required":
+                return "This is a limited card. Enter its activation code to claim it."
+            case "activation_code_invalid_or_used":
+                return "That activation code is invalid, expired, or has already been used."
+            case "too_many_attempts":
+                return "Too many attempts. Please wait a few minutes before trying another code."
+            case "design_not_found":
+                return "This card design is no longer available."
+            case "card_not_found":
+                return "This card is no longer in your collection."
+            case "unauthorized", "admin_unauthorized":
+                return "Your Fog Wallet session expired. Reconnect Fog Wallet in Biogram settings."
+            default:
+                return "Fog Wallet could not complete the request (\(code)). Please try again later."
+            }
         }
     }
 }
@@ -90,6 +112,71 @@ public final class FogWalletConnectionManager {
 
     public func isConnected(accountId: String) -> Bool {
         return loadAccessToken(accountId: accountId) != nil
+    }
+
+    /// Sends a small JSON request to Fog Wallet. Access tokens stay in Keychain and
+    /// are never copied into the card cache or UserDefaults.
+    public func cardRequest(
+        path: String,
+        method: String = "GET",
+        body: [String: Any]? = nil,
+        accountId: String,
+        requiresAuth: Bool = true,
+        completion: @escaping (Result<[String: Any], Error>) -> Void
+    ) {
+        guard method == "GET" || method == "POST" else {
+            DispatchQueue.main.async { completion(.failure(FogWalletConnectionError.invalidResponse)) }
+            return
+        }
+        let accessToken = requiresAuth ? loadAccessToken(accountId: accountId) : nil
+        if requiresAuth && accessToken == nil {
+            DispatchQueue.main.async { completion(.failure(FogWalletConnectionError.serverRejected)) }
+            return
+        }
+        guard let requestURL = URL(string: fogWalletBaseURL.absoluteString + path) else {
+            DispatchQueue.main.async { completion(.failure(FogWalletConnectionError.invalidResponse)) }
+            return
+        }
+        var request = URLRequest(url: requestURL)
+        request.httpMethod = method
+        request.timeoutInterval = 20
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let accessToken {
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        }
+        if let body {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            do {
+                request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
+            } catch {
+                DispatchQueue.main.async { completion(.failure(FogWalletConnectionError.invalidResponse)) }
+                return
+            }
+        }
+        self.session.dataTask(with: request) { data, response, error in
+            if error != nil {
+                DispatchQueue.main.async { completion(.failure(FogWalletConnectionError.serverUnavailable)) }
+                return
+            }
+            guard let httpResponse = response as? HTTPURLResponse, let data,
+                  let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else {
+                DispatchQueue.main.async { completion(.failure(FogWalletConnectionError.invalidResponse)) }
+                return
+            }
+            if httpResponse.statusCode == 401 {
+                DispatchQueue.main.async { completion(.failure(FogWalletConnectionError.serverRejected)) }
+                return
+            }
+            guard (200..<300).contains(httpResponse.statusCode) else {
+                let code = payload["error"] as? String ?? "http_\(httpResponse.statusCode)"
+                DispatchQueue.main.async {
+                    completion(.failure(FogWalletConnectionError.requestFailed(code)))
+                }
+                return
+            }
+            DispatchQueue.main.async { completion(.success(payload)) }
+        }.resume()
     }
 
     public func connect(

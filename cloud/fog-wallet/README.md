@@ -9,7 +9,7 @@ This directory is the source of truth for the Fog Wallet Cloudflare Worker, D1 s
 - **Public API:** `https://fog-wallet-api.collab-docs-b1o.workers.dev`
 - **Admin Studio:** `https://fog-wallet-api.collab-docs-b1o.workers.dev/admin`
 
-The card interface is rendered locally in Biogram. The Worker stores designs, compact artwork, card ownership, activation-code hashes, certificate signatures, transfer history and audit events.
+The card interface is rendered locally in Biogram. It includes cached collection/catalog views, portrait card faces with a 180° flip to a masked authenticity proof, standard-card claims and limited-code activation. The Worker stores designs, compact artwork, card ownership, activation-code hashes, certificate signatures, transfer history and audit events.
 
 ## Required Worker settings
 
@@ -66,7 +66,7 @@ Open `/admin` and use the `FOG_ADMIN_TOKEN` as a Bearer token:
 - `GET /v1/admin/users?telegram_id=...`
 - `GET /v1/admin/activity`
 
-Raw activation codes are displayed once and never saved in D1. Limited designs reserve one edition slot per activation-code row; a database trigger enforces the cap. The card back displays a masked proof, not the activation code. The full certificate is HMAC-SHA-256 signed by the Worker.
+Raw activation codes are displayed once and never saved in D1. Limited designs reserve one edition slot per activation-code row; database triggers enforce the cap and one standard copy per user/design, including concurrent requests and ownership transfers. The card back displays a masked proof, not the activation code. The full certificate is HMAC-SHA-256 signed by the Worker.
 
 ## Migration and deployment
 
@@ -96,3 +96,8 @@ Do not manually insert a fake owned card as a seed. A card becomes real only aft
 - Admin routes require the admin Bearer token; the Studio stores it in sessionStorage for the current browser tab only.
 - A masked proof is a display element, not a transfer credential. Certificate verification is performed server-side.
 - Before wider release, test concurrency, replay, expiration, account mismatch, access control and backup/restore.
+
+
+## Native client notes
+
+The Biogram settings screen opens Fog Wallet only after the Keychain-backed account link exists. Collection and catalog JSON are cached locally for last-known/offline display; authentication tokens are never written to that cache. Catalog artwork is fetched only when a design provides an HTTPS artwork URL. The native client cannot issue cards unless the Worker, schema, signing secret and Admin Studio are configured.

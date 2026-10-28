@@ -244,7 +244,7 @@ private enum BiogramEntryId: Hashable {
     case colorPattern(String), colorPatternOpacity
     case collectiblesHeader, collectible(String), addGiftFromLink
     case bannerHeader, bannerPreview, chooseBanner, removeBanner
-    case fogWalletHeader, fogWalletStatus, connectFogWallet, disconnectFogWallet, fogWalletInfo
+    case fogWalletHeader, fogWalletStatus, openFogWallet, connectFogWallet, disconnectFogWallet, fogWalletInfo
     case info
 }
 
@@ -272,6 +272,7 @@ private enum BiogramEntry: ItemListNodeEntry {
     case removeBanner
     case fogWalletHeader
     case fogWalletStatus(Bool)
+    case openFogWallet
     case connectFogWallet
     case disconnectFogWallet
     case fogWalletInfo
@@ -286,7 +287,7 @@ private enum BiogramEntry: ItemListNodeEntry {
             return BiogramSection.color.rawValue
         case .collectiblesHeader, .collectible, .addGiftFromLink: return BiogramSection.collectibles.rawValue
         case .bannerHeader, .bannerPreview, .chooseBanner, .removeBanner: return BiogramSection.banner.rawValue
-        case .fogWalletHeader, .fogWalletStatus, .connectFogWallet, .disconnectFogWallet, .fogWalletInfo: return BiogramSection.fogWallet.rawValue
+        case .fogWalletHeader, .fogWalletStatus, .openFogWallet, .connectFogWallet, .disconnectFogWallet, .fogWalletInfo: return BiogramSection.fogWallet.rawValue
         case .info: return BiogramSection.info.rawValue
         }
     }
@@ -316,6 +317,7 @@ private enum BiogramEntry: ItemListNodeEntry {
         case .removeBanner: return .removeBanner
         case .fogWalletHeader: return .fogWalletHeader
         case .fogWalletStatus: return .fogWalletStatus
+        case .openFogWallet: return .openFogWallet
         case .connectFogWallet: return .connectFogWallet
         case .disconnectFogWallet: return .disconnectFogWallet
         case .fogWalletInfo: return .fogWalletInfo
@@ -380,12 +382,14 @@ private enum BiogramEntry: ItemListNodeEntry {
             return ItemListSectionHeaderItem(presentationData: presentationData, text: "FOG WALLET", sectionId: self.section)
         case let .fogWalletStatus(connected):
             return ItemListDisclosureItem(presentationData: presentationData, title: "Cloud connection", label: connected ? "Connected" : "Not connected", sectionId: self.section, style: .blocks, action: nil)
+        case .openFogWallet:
+            return ItemListActionItem(presentationData: presentationData, title: "Open card collection", kind: .generic, alignment: .natural, sectionId: self.section, style: .blocks, action: { arguments.openFogWallet() })
         case .connectFogWallet:
             return ItemListActionItem(presentationData: presentationData, title: "Connect Fog Wallet", kind: .generic, alignment: .natural, sectionId: self.section, style: .blocks, action: { arguments.connectFogWallet() })
         case .disconnectFogWallet:
             return ItemListActionItem(presentationData: presentationData, title: "Disconnect Fog Wallet", kind: .destructive, alignment: .natural, sectionId: self.section, style: .blocks, action: { arguments.disconnectFogWallet() })
         case .fogWalletInfo:
-            return ItemListTextItem(presentationData: presentationData, text: .plain("Optional account link. It does not access chats, contacts, or your phone number. Cloud card customization sync is not active yet. You can disconnect at any time."), sectionId: self.section)
+            return ItemListTextItem(presentationData: presentationData, text: .plain("Cards are stored in Fog Wallet and shown here when you open the collection. Linking does not grant access to chats, contacts, or your phone number. You can disconnect at any time."), sectionId: self.section)
         case .info:
             return ItemListTextItem(presentationData: presentationData, text: .plain("Local-only. Visible only in this client. Not sent to Telegram servers. Banner uses original image aspect ratio."), sectionId: self.section)
         }
@@ -408,6 +412,7 @@ private final class BiogramArguments {
     let addGiftFromLink: () -> Void
     let chooseBanner: () -> Void
     let removeBanner: () -> Void
+    let openFogWallet: () -> Void
     let connectFogWallet: () -> Void
     let disconnectFogWallet: () -> Void
    
@@ -427,6 +432,7 @@ private final class BiogramArguments {
         addGiftFromLink: @escaping () -> Void,
         chooseBanner: @escaping () -> Void,
         removeBanner: @escaping () -> Void,
+        openFogWallet: @escaping () -> Void,
         connectFogWallet: @escaping () -> Void,
         disconnectFogWallet: @escaping () -> Void
     ) {
@@ -445,6 +451,7 @@ private final class BiogramArguments {
         self.addGiftFromLink = addGiftFromLink
         self.chooseBanner = chooseBanner
         self.removeBanner = removeBanner
+        self.openFogWallet = openFogWallet
         self.connectFogWallet = connectFogWallet
         self.disconnectFogWallet = disconnectFogWallet
     }
@@ -501,6 +508,7 @@ private func biogramControllerEntries(state: BiogramControllerState) -> [Biogram
     entries.append(.fogWalletHeader)
     entries.append(.fogWalletStatus(state.fogWalletConnected))
     if state.fogWalletConnected {
+        entries.append(.openFogWallet)
         entries.append(.disconnectFogWallet)
     } else {
         entries.append(.connectFogWallet)
@@ -546,7 +554,7 @@ public func biogramSettingsController(context: AccountContext) -> ViewController
                     case .success:
                         let alert = BiogramActionsAlertController(
                             title: "Fog Wallet connected",
-                            message: "Your Telegram account is linked. Cloud card customization sync will be added separately.",
+                            message: "Your Telegram account is linked. Open the Fog Wallet collection from Biogram settings to view and claim cards.",
                             actions: []
                         )
                         presentControllerImpl?(alert, nil)
@@ -756,10 +764,13 @@ public func biogramSettingsController(context: AccountContext) -> ViewController
                 Queue.mainQueue().async { updateState() }
             }
         },
+        openFogWallet: {
+            presentControllerImpl?(FogWalletCardsViewController(accountId: fogWalletAccountId), nil)
+        },
         connectFogWallet: {
             let confirmation = BiogramActionsAlertController(
                 title: "Connect Fog Wallet?",
-                message: "This optional step asks Telegram to confirm that the Telegram account already open in Biogram is yours. Fog Wallet will store a minimal server-side account link and a revocable session. It does not request your phone number, chats, contacts, or permission for the bot to message you. Card customization sync is not active yet. Continue?",
+                message: "Telegram will confirm that the account already open in Biogram is yours. Fog Wallet stores a minimal account link and a revocable session. It does not request your phone number, chats, contacts, or permission for a bot to message you. Continue?",
                 actions: [
                     (title: "Continue to Telegram", destructive: false, action: {
                         startFogWalletConnection()
@@ -835,7 +846,7 @@ public func biogramSettingsController(context: AccountContext) -> ViewController
             guard controller != nil else { return }
             let invitation = BiogramActionsAlertController(
                 title: "Connect Fog Wallet?",
-                message: "Fog Wallet can link this Telegram account so cloud card customization sync can be enabled later. Telegram will confirm the account. We do not request your phone number, chats, or contacts. Connecting is optional, and you can disconnect any time in Biogram settings.",
+                message: "Connect Fog Wallet to view your card collection and claim cards in Biogram. Telegram confirms the account. Fog Wallet does not request your phone number, chats, or contacts. Connecting is optional, and you can disconnect any time in Biogram settings.",
                 actions: [
                     (title: "Connect", destructive: false, action: {
                         startFogWalletConnection()
@@ -846,4 +857,523 @@ public func biogramSettingsController(context: AccountContext) -> ViewController
         }
     }
     return controller
+}
+// MARK: - Fog Wallet cards
+
+private func fogWalletColor(_ hex: String) -> UIColor {
+    var value = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+    if value.count != 6 { value = "171719" }
+    var rgb: UInt64 = 0
+    Scanner(string: value).scanHexInt64(&rgb)
+    return UIColor(
+        red: CGFloat((rgb >> 16) & 0xff) / 255.0,
+        green: CGFloat((rgb >> 8) & 0xff) / 255.0,
+        blue: CGFloat(rgb & 0xff) / 255.0,
+        alpha: 1.0
+    )
+}
+
+private final class FogWalletActionButton: UIButton {
+    var handler: (() -> Void)?
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        self.addTarget(self, action: #selector(runHandler), for: .touchUpInside)
+        self.titleLabel?.font = UIFont.systemFont(ofSize: 14, weight: .semibold)
+        self.layer.cornerRadius = 13
+        self.layer.masksToBounds = true
+        self.contentEdgeInsets = UIEdgeInsets(top: 11, left: 15, bottom: 11, right: 15)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+    @objc private func runHandler() { self.handler?() }
+}
+
+private final class FogPremiumCardView: UIControl {
+    private let gradient = CAGradientLayer()
+    private let artworkView = UIImageView()
+    private let overlayView = UIView()
+    private let overlayGradient = CAGradientLayer()
+    private let faceView = UIView()
+    private var card: [String: Any] = [:]
+    private var design: [String: Any] = [:]
+    private var showingBack = false
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        self.layer.cornerRadius = 25
+        self.layer.borderWidth = 1
+        self.layer.borderColor = UIColor.white.withAlphaComponent(0.23).cgColor
+        self.layer.shadowColor = UIColor.black.cgColor
+        self.layer.shadowOpacity = 0.38
+        self.layer.shadowRadius = 18
+        self.layer.shadowOffset = CGSize(width: 0, height: 11)
+        self.layer.masksToBounds = false
+        self.layer.insertSublayer(self.gradient, at: 0)
+        self.artworkView.contentMode = .scaleAspectFill
+        self.artworkView.clipsToBounds = true
+        self.artworkView.layer.cornerRadius = 24
+        self.artworkView.isUserInteractionEnabled = false
+        self.addSubview(self.artworkView)
+        self.overlayView.isUserInteractionEnabled = false
+        self.overlayGradient.colors = [
+            UIColor.black.withAlphaComponent(0.10).cgColor,
+            UIColor.black.withAlphaComponent(0.26).cgColor,
+            UIColor.black.withAlphaComponent(0.82).cgColor
+        ]
+        self.overlayGradient.locations = [0.0, 0.48, 1.0]
+        self.overlayView.layer.addSublayer(self.overlayGradient)
+        self.addSubview(self.overlayView)
+        self.faceView.backgroundColor = .clear
+        self.faceView.isUserInteractionEnabled = false
+        self.addSubview(self.faceView)
+        self.addTarget(self, action: #selector(toggleFace), for: .touchUpInside)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        self.gradient.frame = self.bounds
+        self.artworkView.frame = self.bounds
+        self.overlayView.frame = self.bounds
+        self.overlayGradient.frame = self.overlayView.bounds
+        self.faceView.frame = self.bounds
+        self.layer.shadowPath = UIBezierPath(roundedRect: self.bounds, cornerRadius: 25).cgPath
+    }
+
+    func configure(card: [String: Any]) {
+        self.card = card
+        self.design = card["design"] as? [String: Any] ?? card
+        let palette = (self.design["palette"] as? [String]) ?? ["#151517", "#343238", "#C9B79E"]
+        let colors = palette.prefix(4).map { fogWalletColor($0).cgColor }
+        self.gradient.colors = colors.count >= 2 ? colors : [fogWalletColor("#171719").cgColor, fogWalletColor("#373137").cgColor]
+        self.gradient.startPoint = CGPoint(x: 0.0, y: 0.0)
+        self.gradient.endPoint = CGPoint(x: 1.0, y: 1.0)
+        self.artworkView.image = nil
+        if let art = self.design["asset_url"] as? String,
+           let url = URL(string: art), url.scheme == "https" {
+            URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
+                guard let data, let image = UIImage(data: data) else { return }
+                DispatchQueue.main.async { self?.artworkView.image = image }
+            }.resume()
+        }
+        self.showingBack = false
+        self.renderFace()
+    }
+
+    @objc private func toggleFace() {
+        self.showingBack.toggle()
+        UIView.transition(
+            with: self.faceView,
+            duration: 0.52,
+            options: [.transitionFlipFromRight, .showHideTransitionViews, .curveEaseInOut],
+            animations: { [weak self] in self?.renderFace() }
+        )
+    }
+
+    private func makeLabel(_ text: String, size: CGFloat, weight: UIFont.Weight, color: UIColor, lines: Int = 1) -> UILabel {
+        let label = UILabel()
+        label.text = text
+        label.font = UIFont.systemFont(ofSize: size, weight: weight)
+        label.textColor = color
+        label.numberOfLines = lines
+        label.adjustsFontSizeToFitWidth = true
+        label.minimumScaleFactor = 0.75
+        return label
+    }
+
+    private func renderFace() {
+        self.faceView.subviews.forEach { $0.removeFromSuperview() }
+        let inset: CGFloat = 21
+        if self.showingBack {
+            let stamp = self.makeLabel("FOG  /  CERTIFICATE", size: 10, weight: .bold, color: UIColor.white.withAlphaComponent(0.72))
+            let title = self.makeLabel("Authenticity proof", size: 20, weight: .semibold, color: .white, lines: 2)
+            let proof = self.makeLabel(self.card["proof"] as? String ?? "NOT ISSUED", size: 13, weight: .semibold, color: fogWalletColor("#E6D4B7"))
+            proof.font = UIFont.monospacedSystemFont(ofSize: 13, weight: .semibold)
+            let serial = self.makeLabel("SERIAL  " + (self.card["serial"] as? String ?? "PREVIEW"), size: 10, weight: .medium, color: UIColor.white.withAlphaComponent(0.82))
+            serial.font = UIFont.monospacedSystemFont(ofSize: 10, weight: .medium)
+            let valid = (self.card["certificate_verified"] as? Bool) == true
+            let state = self.makeLabel(
+                valid ? "✓  VERIFIED CERTIFICATE" : (self.card["serial"] == nil ? "PREVIEW — NOT ISSUED" : "CERTIFICATE STATUS UNCONFIRMED"),
+                size: 10, weight: .bold,
+                color: valid ? fogWalletColor("#D9C29E") : UIColor.white.withAlphaComponent(0.64),
+                lines: 2
+            )
+            let note = self.makeLabel("This masked proof is not the activation code.", size: 10, weight: .regular, color: UIColor.white.withAlphaComponent(0.56), lines: 2)
+            [stamp, title, proof, serial, state, note].forEach { self.faceView.addSubview($0); $0.translatesAutoresizingMaskIntoConstraints = false }
+            NSLayoutConstraint.activate([
+                stamp.topAnchor.constraint(equalTo: self.faceView.topAnchor, constant: 25),
+                stamp.leadingAnchor.constraint(equalTo: self.faceView.leadingAnchor, constant: inset),
+                stamp.trailingAnchor.constraint(lessThanOrEqualTo: self.faceView.trailingAnchor, constant: -inset),
+                title.topAnchor.constraint(equalTo: stamp.bottomAnchor, constant: 34),
+                title.leadingAnchor.constraint(equalTo: self.faceView.leadingAnchor, constant: inset),
+                title.trailingAnchor.constraint(equalTo: self.faceView.trailingAnchor, constant: -inset),
+                proof.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 28),
+                proof.leadingAnchor.constraint(equalTo: self.faceView.leadingAnchor, constant: inset),
+                proof.trailingAnchor.constraint(equalTo: self.faceView.trailingAnchor, constant: -inset),
+                serial.topAnchor.constraint(equalTo: proof.bottomAnchor, constant: 23),
+                serial.leadingAnchor.constraint(equalTo: self.faceView.leadingAnchor, constant: inset),
+                serial.trailingAnchor.constraint(equalTo: self.faceView.trailingAnchor, constant: -inset),
+                state.leadingAnchor.constraint(equalTo: self.faceView.leadingAnchor, constant: inset),
+                state.trailingAnchor.constraint(equalTo: self.faceView.trailingAnchor, constant: -inset),
+                state.bottomAnchor.constraint(equalTo: note.topAnchor, constant: -14),
+                note.leadingAnchor.constraint(equalTo: self.faceView.leadingAnchor, constant: inset),
+                note.trailingAnchor.constraint(equalTo: self.faceView.trailingAnchor, constant: -inset),
+                note.bottomAnchor.constraint(equalTo: self.faceView.bottomAnchor, constant: -22)
+            ])
+        } else {
+            let logo = self.makeLabel("FOG", size: 12, weight: .heavy, color: UIColor.white.withAlphaComponent(0.94))
+            let topRight = self.makeLabel("PRIVATE COLLECTION", size: 8, weight: .bold, color: UIColor.white.withAlphaComponent(0.76))
+            topRight.textAlignment = .right
+            let ornament = self.makeLabel("◌", size: 56, weight: .ultraLight, color: UIColor.white.withAlphaComponent(0.17))
+            ornament.textAlignment = .right
+            let series = self.makeLabel((self.design["series"] as? String ?? "Fog Originals").uppercased(), size: 9, weight: .semibold, color: UIColor.white.withAlphaComponent(0.65))
+            let title = self.makeLabel(self.design["title"] as? String ?? "Fog Card", size: 22, weight: .semibold, color: .white, lines: 3)
+            let subtitle = self.makeLabel(self.design["subtitle"] as? String ?? "", size: 11, weight: .regular, color: UIColor.white.withAlphaComponent(0.72), lines: 2)
+            let rarity = self.makeLabel((self.design["rarity"] as? String ?? "Standard").uppercased(), size: 9, weight: .bold, color: fogWalletColor("#E7D7C0"))
+            let serial = self.makeLabel(self.card["serial"] as? String ?? "CARD PREVIEW", size: 9, weight: .medium, color: UIColor.white.withAlphaComponent(0.76))
+            serial.font = UIFont.monospacedSystemFont(ofSize: 9, weight: .medium)
+            [logo, topRight, ornament, series, title, subtitle, rarity, serial].forEach { self.faceView.addSubview($0); $0.translatesAutoresizingMaskIntoConstraints = false }
+            NSLayoutConstraint.activate([
+                logo.topAnchor.constraint(equalTo: self.faceView.topAnchor, constant: 23),
+                logo.leadingAnchor.constraint(equalTo: self.faceView.leadingAnchor, constant: inset),
+                topRight.centerYAnchor.constraint(equalTo: logo.centerYAnchor),
+                topRight.trailingAnchor.constraint(equalTo: self.faceView.trailingAnchor, constant: -inset),
+                topRight.leadingAnchor.constraint(greaterThanOrEqualTo: logo.trailingAnchor, constant: 6),
+                ornament.topAnchor.constraint(equalTo: logo.bottomAnchor, constant: 2),
+                ornament.trailingAnchor.constraint(equalTo: self.faceView.trailingAnchor, constant: -inset),
+                series.leadingAnchor.constraint(equalTo: self.faceView.leadingAnchor, constant: inset),
+                series.trailingAnchor.constraint(equalTo: self.faceView.trailingAnchor, constant: -inset),
+                series.bottomAnchor.constraint(equalTo: title.topAnchor, constant: -10),
+                title.leadingAnchor.constraint(equalTo: self.faceView.leadingAnchor, constant: inset),
+                title.trailingAnchor.constraint(equalTo: self.faceView.trailingAnchor, constant: -inset),
+                title.bottomAnchor.constraint(equalTo: subtitle.topAnchor, constant: -5),
+                subtitle.leadingAnchor.constraint(equalTo: self.faceView.leadingAnchor, constant: inset),
+                subtitle.trailingAnchor.constraint(equalTo: self.faceView.trailingAnchor, constant: -inset),
+                subtitle.bottomAnchor.constraint(equalTo: rarity.topAnchor, constant: -21),
+                rarity.leadingAnchor.constraint(equalTo: self.faceView.leadingAnchor, constant: inset),
+                rarity.bottomAnchor.constraint(equalTo: serial.topAnchor, constant: -13),
+                serial.leadingAnchor.constraint(equalTo: self.faceView.leadingAnchor, constant: inset),
+                serial.trailingAnchor.constraint(equalTo: self.faceView.trailingAnchor, constant: -inset),
+                serial.bottomAnchor.constraint(equalTo: self.faceView.bottomAnchor, constant: -22)
+            ])
+        }
+    }
+}
+
+private final class FogWalletCardsViewController: ViewController {
+    private enum Tab { case collection, catalog }
+    private let accountId: String
+    private let cacheCollectionKey: String
+    private let cacheCatalogKey: String
+    private var cards: [[String: Any]] = []
+    private var designs: [[String: Any]] = []
+    private var activeTab: Tab = .collection
+    private var statusMessage: String?
+    private var isRefreshing = false
+    private let scrollView = UIScrollView()
+    private let contentStack = UIStackView()
+
+    init(accountId: String) {
+        self.accountId = accountId
+        self.cacheCollectionKey = "fog.cards.collection.\(accountId)"
+        self.cacheCatalogKey = "fog.cards.catalog.\(accountId)"
+        super.init(navigationBarPresentationData: nil)
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func loadDisplayNode() {
+        self.displayNode = ASDisplayNode()
+        self.displayNode.backgroundColor = fogWalletColor("#0B0B0D")
+        let root = self.displayNode.view
+        root.backgroundColor = fogWalletColor("#0B0B0D")
+        self.scrollView.alwaysBounceVertical = true
+        self.scrollView.keyboardDismissMode = .interactive
+        self.scrollView.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(self.scrollView)
+        self.contentStack.axis = .vertical
+        self.contentStack.alignment = .fill
+        self.contentStack.spacing = 18
+        self.contentStack.translatesAutoresizingMaskIntoConstraints = false
+        self.scrollView.addSubview(self.contentStack)
+        NSLayoutConstraint.activate([
+            self.scrollView.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
+            self.scrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            self.scrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            self.scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            self.contentStack.topAnchor.constraint(equalTo: self.scrollView.contentLayoutGuide.topAnchor, constant: 20),
+            self.contentStack.leadingAnchor.constraint(equalTo: self.scrollView.contentLayoutGuide.leadingAnchor, constant: 18),
+            self.contentStack.trailingAnchor.constraint(equalTo: self.scrollView.contentLayoutGuide.trailingAnchor, constant: -18),
+            self.contentStack.bottomAnchor.constraint(equalTo: self.scrollView.contentLayoutGuide.bottomAnchor, constant: -28),
+            self.contentStack.widthAnchor.constraint(equalTo: self.scrollView.frameLayoutGuide.widthAnchor, constant: -36)
+        ])
+        self.loadCache()
+        self.render()
+        self.refreshData()
+    }
+
+    private func loadCache() {
+        if let data = UserDefaults.standard.data(forKey: self.cacheCollectionKey),
+           let values = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            self.cards = values
+        }
+        if let data = UserDefaults.standard.data(forKey: self.cacheCatalogKey),
+           let values = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            self.designs = values
+        }
+    }
+
+    private func save(_ values: [[String: Any]], key: String) {
+        guard let data = try? JSONSerialization.data(withJSONObject: values, options: []) else { return }
+        UserDefaults.standard.set(data, forKey: key)
+    }
+
+    private func label(_ text: String, size: CGFloat, weight: UIFont.Weight = .regular, color: UIColor = .white, lines: Int = 0) -> UILabel {
+        let view = UILabel()
+        view.text = text
+        view.font = UIFont.systemFont(ofSize: size, weight: weight)
+        view.textColor = color
+        view.numberOfLines = lines
+        return view
+    }
+
+    private func actionButton(_ title: String, primary: Bool = false, handler: @escaping () -> Void) -> UIButton {
+        let button = FogWalletActionButton(type: .system)
+        button.handler = handler
+        button.setTitle(title, for: .normal)
+        button.backgroundColor = primary ? fogWalletColor("#D8C2A2") : fogWalletColor("#202024")
+        button.setTitleColor(primary ? fogWalletColor("#171619") : UIColor.white, for: .normal)
+        button.layer.borderColor = UIColor.white.withAlphaComponent(primary ? 0.0 : 0.12).cgColor
+        button.layer.borderWidth = primary ? 0 : 1
+        return button
+    }
+
+    private func clearStack() {
+        while let view = self.contentStack.arrangedSubviews.last {
+            self.contentStack.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+    }
+
+    private func render() {
+        guard self.isViewLoaded else { return }
+        self.clearStack()
+        let topBar = UIStackView()
+        topBar.axis = .horizontal
+        topBar.alignment = .center
+        topBar.distribution = .equalSpacing
+        topBar.addArrangedSubview(self.actionButton("‹  Biogram") { [weak self] in self?.dismiss(animated: true) })
+        topBar.addArrangedSubview(self.actionButton("Refresh") { [weak self] in self?.refreshData() })
+        self.contentStack.addArrangedSubview(topBar)
+        let title = self.label("FOG WALLET", size: 11, weight: .bold, color: fogWalletColor("#D8C2A2"))
+        self.contentStack.addArrangedSubview(title)
+        let subtitle = self.label("A private collection. Not a trading game.", size: 25, weight: .semibold, color: .white, lines: 2)
+        subtitle.adjustsFontSizeToFitWidth = true
+        subtitle.minimumScaleFactor = 0.82
+        self.contentStack.addArrangedSubview(subtitle)
+        self.contentStack.addArrangedSubview(self.label("Tap any card to turn it over and view its masked authenticity proof. Activation codes are never shown on a card.", size: 13, color: UIColor.white.withAlphaComponent(0.58), lines: 0))
+        if let message = self.statusMessage {
+            let status = self.label(message, size: 12, color: fogWalletColor("#D9C6A9"), lines: 0)
+            status.backgroundColor = fogWalletColor("#1B1918")
+            status.layer.cornerRadius = 12
+            status.layer.masksToBounds = true
+            self.contentStack.addArrangedSubview(status)
+        }
+        let tabs = UIStackView()
+        tabs.axis = .horizontal
+        tabs.distribution = .fillEqually
+        tabs.spacing = 8
+        tabs.addArrangedSubview(self.actionButton(self.cards.isEmpty ? "My cards" : "My cards · \(self.cards.count)", primary: self.activeTab == .collection) { [weak self] in
+            self?.activeTab = .collection
+            self?.render()
+        })
+        tabs.addArrangedSubview(self.actionButton("Discover", primary: self.activeTab == .catalog) { [weak self] in
+            self?.activeTab = .catalog
+            self?.render()
+        })
+        self.contentStack.addArrangedSubview(tabs)
+        self.contentStack.addArrangedSubview(self.actionButton("Activate a code", handler: { [weak self] in self?.promptForActivationCode() }))
+        if self.activeTab == .collection {
+            if self.cards.isEmpty {
+                self.contentStack.addArrangedSubview(self.label("Your collection is empty", size: 19, weight: .semibold, color: .white))
+                self.contentStack.addArrangedSubview(self.label("You can collect a standard design without a code, or activate a limited-edition card with a code.", size: 13, color: UIColor.white.withAlphaComponent(0.58), lines: 0))
+                self.contentStack.addArrangedSubview(self.actionButton("Explore card designs", primary: true) { [weak self] in
+                    self?.activeTab = .catalog
+                    self?.render()
+                })
+            } else {
+                for card in self.cards { self.addCollectionCard(card) }
+            }
+        } else {
+            if self.designs.isEmpty {
+                self.contentStack.addArrangedSubview(self.label("No card designs are published yet.", size: 16, weight: .semibold, color: .white))
+                self.contentStack.addArrangedSubview(self.label("The collection will refresh when designs become available on the Fog Wallet server.", size: 13, color: UIColor.white.withAlphaComponent(0.58), lines: 0))
+            } else {
+                for design in self.designs { self.addCatalogDesign(design) }
+            }
+        }
+        self.contentStack.addArrangedSubview(self.label("Artwork, collection and proof status refresh from Fog Wallet. Your last successful collection/catalog are cached on this device.", size: 11, color: UIColor.white.withAlphaComponent(0.40), lines: 0))
+    }
+
+    private func addCollectionCard(_ card: [String: Any]) {
+        let cardView = FogPremiumCardView()
+        cardView.configure(card: card)
+        cardView.translatesAutoresizingMaskIntoConstraints = false
+        let centering = UIView()
+        centering.addSubview(cardView)
+        NSLayoutConstraint.activate([
+            cardView.centerXAnchor.constraint(equalTo: centering.centerXAnchor),
+            cardView.topAnchor.constraint(equalTo: centering.topAnchor),
+            cardView.bottomAnchor.constraint(equalTo: centering.bottomAnchor),
+            cardView.widthAnchor.constraint(equalToConstant: 222),
+            cardView.heightAnchor.constraint(equalToConstant: 332)
+        ])
+        self.contentStack.addArrangedSubview(centering)
+        let issued = (card["issued_at"] as? NSNumber)?.doubleValue ?? 0
+        let date = DateFormatter()
+        date.dateStyle = .medium
+        date.timeStyle = .none
+        let dateText = issued > 0 ? date.string(from: Date(timeIntervalSince1970: issued)) : "Date unavailable"
+        let design = card["design"] as? [String: Any] ?? [:]
+        self.contentStack.addArrangedSubview(self.label("\(design["title"] as? String ?? "Fog Card")  ·  \(dateText)", size: 12, color: UIColor.white.withAlphaComponent(0.62), lines: 2))
+    }
+
+    private func addCatalogDesign(_ design: [String: Any]) {
+        let row = UIStackView()
+        row.axis = .horizontal
+        row.alignment = .center
+        row.spacing = 14
+        let preview = FogPremiumCardView()
+        preview.configure(card: design)
+        preview.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            preview.widthAnchor.constraint(equalToConstant: 145),
+            preview.heightAnchor.constraint(equalToConstant: 218)
+        ])
+        row.addArrangedSubview(preview)
+        let details = UIStackView()
+        details.axis = .vertical
+        details.alignment = .fill
+        details.spacing = 8
+        details.addArrangedSubview(self.label(design["title"] as? String ?? "Fog Card", size: 16, weight: .semibold, color: .white, lines: 3))
+        details.addArrangedSubview(self.label("\(design["rarity"] as? String ?? "Standard")  ·  \(design["series"] as? String ?? "Fog Originals")", size: 11, color: fogWalletColor("#D8C2A2"), lines: 2))
+        details.addArrangedSubview(self.label(design["subtitle"] as? String ?? "", size: 12, color: UIColor.white.withAlphaComponent(0.56), lines: 3))
+        if (design["kind"] as? String ?? "standard") == "standard" {
+            details.addArrangedSubview(self.actionButton("Collect", primary: true) { [weak self] in
+                self?.claim(designId: design["id"] as? String ?? "")
+            })
+        } else {
+            details.addArrangedSubview(self.actionButton("Activation code") { [weak self] in self?.promptForActivationCode() })
+            if let remaining = design["remaining"] as? NSNumber {
+                details.addArrangedSubview(self.label("\(remaining.intValue) left in run", size: 10, color: UIColor.white.withAlphaComponent(0.52)))
+            }
+        }
+        row.addArrangedSubview(details)
+        self.contentStack.addArrangedSubview(row)
+        let separator = UIView()
+        separator.backgroundColor = UIColor.white.withAlphaComponent(0.07)
+        separator.heightAnchor.constraint(equalToConstant: 1).isActive = true
+        self.contentStack.addArrangedSubview(separator)
+    }
+
+    private func refreshData() {
+        guard !self.isRefreshing else { return }
+        self.isRefreshing = true
+        self.statusMessage = "Refreshing Fog Wallet…"
+        self.render()
+        let group = DispatchGroup()
+        var hadFailure = false
+        group.enter()
+        FogWalletConnectionManager.shared.cardRequest(
+            path: "/v1/cards/catalog", method: "GET", body: nil,
+            accountId: self.accountId, requiresAuth: false
+        ) { [weak self] result in
+            guard let self else { group.leave(); return }
+            if case let .success(payload) = result, let designs = payload["designs"] as? [[String: Any]] {
+                self.designs = designs
+                self.save(designs, key: self.cacheCatalogKey)
+            } else {
+                hadFailure = true
+            }
+            group.leave()
+        }
+        group.enter()
+        FogWalletConnectionManager.shared.cardRequest(
+            path: "/v1/cards/collection", method: "GET", body: nil,
+            accountId: self.accountId, requiresAuth: true
+        ) { [weak self] result in
+            guard let self else { group.leave(); return }
+            if case let .success(payload) = result, let cards = payload["cards"] as? [[String: Any]] {
+                self.cards = cards
+                self.save(cards, key: self.cacheCollectionKey)
+            } else {
+                hadFailure = true
+            }
+            group.leave()
+        }
+        group.notify(queue: .main) { [weak self] in
+            guard let self else { return }
+            self.isRefreshing = false
+            self.statusMessage = hadFailure ? "Some data could not refresh. Showing the last saved data where available." : nil
+            self.render()
+        }
+    }
+
+    private func claim(designId: String) {
+        guard !designId.isEmpty else { return }
+        FogWalletConnectionManager.shared.cardRequest(
+            path: "/v1/cards/claim", method: "POST",
+            body: ["design_id": designId], accountId: self.accountId
+        ) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success:
+                self.activeTab = .collection
+                let alert = UIAlertController(title: "Card added", message: "Fog Wallet has refreshed your collection.", preferredStyle: .alert)
+                alert.addAction(UIAlertAction(title: "Continue", style: .default) { [weak self] _ in self?.refreshData() })
+                self.present(alert, animated: true)
+            case let .failure(error):
+                self.showMessage(title: "Could not collect card", message: error.localizedDescription)
+            }
+        }
+    }
+
+    private func promptForActivationCode() {
+        let alert = UIAlertController(title: "Activate a card", message: "Enter the activation code. The code will not be displayed on the card.", preferredStyle: .alert)
+        alert.addTextField { field in
+            field.placeholder = "FOG-XXXX-XXXX-XXXX"
+            field.autocapitalizationType = .allCharacters
+            field.autocorrectionType = .no
+            field.clearButtonMode = .whileEditing
+        }
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Activate", style: .default) { [weak self, weak alert] _ in
+            let code = alert?.textFields?.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !code.isEmpty else { return }
+            self?.activate(code: code)
+        })
+        self.present(alert, animated: true)
+    }
+
+    private func activate(code: String) {
+        FogWalletConnectionManager.shared.cardRequest(
+            path: "/v1/cards/activate", method: "POST",
+            body: ["code": code], accountId: self.accountId
+        ) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success:
+                self.activeTab = .collection
+                let alert = UIAlertController(title: "Card activated", message: "The card is now in your Fog Wallet collection.", preferredStyle: .alert)
+                alert.addAction(UIAlertAction(title: "Show collection", style: .default) { [weak self] _ in self?.refreshData() })
+                self.present(alert, animated: true)
+            case let .failure(error):
+                self.showMessage(title: "Activation failed", message: error.localizedDescription)
+            }
+        }
+    }
+
+    private func showMessage(title: String, message: String) {
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        self.present(alert, animated: true)
+    }
 }
