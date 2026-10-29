@@ -102,6 +102,33 @@ public struct BiogramProfileColor: Codable, Equatable {
     ]
 }
 
+/// Appearance for a locally designed, two-sided Biogram profile card.
+public struct BiogramProfileCardStyle: Codable, Equatable {
+    /// One of the existing Biogram palette names.
+    public var paletteName: String
+    /// "matte", "glossy", or "metallic".
+    public var material: String
+    /// Local filename for optional front artwork. This is not an activation key.
+    public var imageFilename: String?
+
+    public init(
+        paletteName: String = "Dark Red",
+        material: String = "glossy",
+        imageFilename: String? = nil
+    ) {
+        let paletteNames = BiogramProfileColor.presets.map { $0.0 }
+        self.paletteName = paletteNames.contains(paletteName) ? paletteName : "Dark Red"
+        self.material = ["matte", "glossy", "metallic"].contains(material) ? material : "glossy"
+        self.imageFilename = imageFilename
+    }
+
+    public static let materials: [(String, String)] = [
+        ("Matte", "matte"),
+        ("Glossy", "glossy"),
+        ("Metallic", "metallic")
+    ]
+}
+
 public struct BiogramCustomizations: Codable, Equatable {
     public var localPremiumEnabled: Bool
     public var showPremiumBadge: Bool
@@ -109,6 +136,7 @@ public struct BiogramCustomizations: Codable, Equatable {
     public var localAliases: [String]
     public var profileColor: BiogramProfileColor?
     public var profileColorEnabled: Bool
+    public var profileCardStyle: BiogramProfileCardStyle?
 
     public init(
         localPremiumEnabled: Bool = false,
@@ -116,7 +144,8 @@ public struct BiogramCustomizations: Codable, Equatable {
         badgeStyle: String? = "stars",
         localAliases: [String] = [],
         profileColor: BiogramProfileColor? = nil,
-        profileColorEnabled: Bool = false
+        profileColorEnabled: Bool = false,
+        profileCardStyle: BiogramProfileCardStyle? = nil
     ) {
         self.localPremiumEnabled = localPremiumEnabled
         self.showPremiumBadge = showPremiumBadge
@@ -124,6 +153,7 @@ public struct BiogramCustomizations: Codable, Equatable {
         self.localAliases = localAliases
         self.profileColor = profileColor
         self.profileColorEnabled = profileColorEnabled
+        self.profileCardStyle = profileCardStyle
     }
 }
 
