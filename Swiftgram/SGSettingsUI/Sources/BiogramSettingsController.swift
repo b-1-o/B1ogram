@@ -495,11 +495,12 @@ private func telegramProfileColor(for color: BiogramProfileColor) -> PeerNameCol
         (0.28, 0.49, 0.93, .blue),
         (0.91, 0.32, 0.60, .pink)
     ]
-    return candidates.min(by: { lhs, rhs in
+    guard let nearest = candidates.min(by: { lhs, rhs in
         let ld = pow(r - lhs.0, 2) + pow(g - lhs.1, 2) + pow(b - lhs.2, 2)
         let rd = pow(r - rhs.0, 2) + pow(g - rhs.1, 2) + pow(b - rhs.2, 2)
         return ld < rd
-    })?.3 ?? .blue
+    }) else { return .blue }
+    return nearest.3
 }
 
 /// Profile accents are written to Telegram's own profile-color API so other Telegram/Biogram users
@@ -990,7 +991,7 @@ private final class Biogram3DProfileCardView: UIView {
             face.layer.isDoubleSided = false
             self.cardContainer.addSubview(face)
         }
-        self.back.transform = CATransform3DMakeRotation(.pi, 0.0, 1.0, 0.0)
+        self.back.layer.transform = CATransform3DMakeRotation(.pi, 0.0, 1.0, 0.0)
 
         self.frontGradient.startPoint = CGPoint(x: 0.0, y: 0.0)
         self.frontGradient.endPoint = CGPoint(x: 1.0, y: 1.0)
@@ -1158,6 +1159,7 @@ private final class Biogram3DProfileCardView: UIView {
         self.back.frame = self.cardContainer.bounds
         self.frontGradient.frame = self.front.bounds
         self.frontArtwork.frame = self.front.bounds
+        self.frontSheen.frame = self.front.bounds
         self.backGradient.frame = self.back.bounds
         self.backSheen.frame = self.back.bounds
         self.cardContainer.layer.shadowPath = UIBezierPath(roundedRect: self.cardContainer.bounds, cornerRadius: 25).cgPath
@@ -1267,6 +1269,21 @@ private final class BiogramCardArtworkPickerDelegate: NSObject, UIImagePickerCon
     }
 }
 
+private final class BiogramActionButton: UIButton {
+    var handler: (() -> Void)?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        self.addTarget(self, action: #selector(runHandler), for: .touchUpInside)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    @objc private func runHandler() {
+        self.handler?()
+    }
+}
+
 private final class BiogramProfileCardDesignerController: ViewController {
     private let context: AccountContext
     private let accountId: String
@@ -1336,7 +1353,8 @@ private final class BiogramProfileCardDesignerController: ViewController {
     }
 
     private func button(_ title: String, selected: Bool = false, handler: @escaping () -> Void) -> UIButton {
-        let button = UIButton(type: .system)
+        let button = BiogramActionButton(frame: .zero)
+        button.handler = handler
         button.setTitle(title, for: .normal)
         button.titleLabel?.font = UIFont.systemFont(ofSize: 13, weight: .semibold)
         button.setTitleColor(selected ? biogramCardColor("#121214") : .white, for: .normal)
@@ -1345,8 +1363,6 @@ private final class BiogramProfileCardDesignerController: ViewController {
         button.layer.borderWidth = selected ? 0 : 1
         button.layer.borderColor = UIColor.white.withAlphaComponent(0.10).cgColor
         button.contentEdgeInsets = UIEdgeInsets(top: 11, left: 12, bottom: 11, right: 12)
-        let action = UIAction { _ in handler() }
-        button.addAction(action, for: .touchUpInside)
         return button
     }
 
