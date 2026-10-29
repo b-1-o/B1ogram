@@ -1,103 +1,32 @@
-# Fog Wallet — Worker, cards and Studio
+# Biogram profile appearance
 
-This directory is the source of truth for the Fog Wallet Cloudflare Worker, D1 schema and web-based administration page.
+Biogram now keeps profile-card artwork and material choices on the device and uses Telegram's native profile-color API for the public profile accent.
 
-## Current services
+## Native iOS profile card
 
-- **Worker:** `fog-wallet-api`
-- **D1:** `fog-wallet-db`
-- **Public API:** `https://fog-wallet-api.collab-docs-b1o.workers.dev`
-- **Admin Studio:** `https://fog-wallet-api.collab-docs-b1o.workers.dev/admin`
+The iOS settings screen includes a 3D profile-card studio:
+- The card has separate front and back faces, perspective rotation, drag-to-tilt interaction and a spring return.
+- The front supports a photo selected from the user's library or one of Biogram's existing palette colors.
+- Surface choices are matte, glossy and metallic.
+- The back shows the Telegram username, numeric Telegram ID and a decorative profile signature. The signature is not an authorization token, activation code, or payment credential.
+- Artwork and material preferences are stored in the app's local account-specific settings. They are not uploaded to this Worker.
 
-The card interface is rendered locally in Biogram. It includes cached collection/catalog views, portrait card faces with a 180° flip to a masked authenticity proof, standard-card claims and limited-code activation. The Worker stores designs, compact artwork, card ownership, activation-code hashes, certificate signatures, transfer history and audit events.
+## Public profile colors
 
-## Required Worker settings
+The profile-color control retains Biogram's existing palette. When a color is selected, Biogram maps it to the nearest Telegram-supported profile color and asks Telegram to save it, so other Telegram/Biogram clients can display the native profile-color accent. Telegram supports a fixed set of profile colors; it cannot publish Biogram's arbitrary RGB shade or custom card artwork through this API.
 
-Keep all credentials out of Git:
+## Retired service
 
-- `TELEGRAM_CLIENT_ID` — plain-text Worker variable from BotFather OpenID.
-- `TELEGRAM_CLIENT_SECRET` — Worker secret.
-- `FOG_ADMIN_TOKEN` — random secret of at least 32 characters, used as a Bearer token for Admin Studio.
-- `FOG_CARD_SIGNING_KEY` — random secret of at least 32 characters for HMAC-SHA-256 card certificates.
+The previous Fog Wallet collection, card issuance, activation codes, admin Studio and Telegram OAuth-linking endpoints have been retired. Legacy endpoints return HTTP 410. The Worker only exposes `GET /health` for operational checks.
 
-Generate two separate random values locally with `openssl rand -hex 32`, then add them as separate secrets in Cloudflare Worker settings. Do not put them in source files, issues, or screenshots. Rotating the signing key requires a key-versioning plan or old card proofs will fail verification.
+The old D1 database and migration files are intentionally retained as dormant historical data; this repository does not drop the database or erase its records. It is no longer bound to the Worker.
 
-## Telegram account linking
+## Deploy
 
-BotFather → selected bot → Login Widget → OpenID must list:
-
-- Redirect: `https://fog-wallet-api.collab-docs-b1o.workers.dev/v1/auth/telegram/callback`
-- Trusted origin: `https://fog-wallet-api.collab-docs-b1o.workers.dev`
-
-The OIDC callback verifies the Telegram OIDC identity and stores its signed Telegram identifier plus the available username/display name. Biogram still needs a compatible native build and a successful Connect flow before a user appears in the linked-account table.
-
-## API routes
-
-### Account linking
-- `GET /health`
-- `POST /v1/connect/telegram/start`
-- `GET /v1/auth/telegram/callback`
-- `POST /v1/connect/telegram/status`
-- `GET /v1/me`
-- `POST /v1/connect/disconnect`
-
-### Cards
-- `GET /v1/cards/catalog` — enabled designs, palette, rarity, print-run count and artwork URL.
-- `GET /v1/cards/collection` — authenticated user's cards.
-- `GET /v1/cards/:id` — owner-only detail with signature verification and issuance events.
-- `POST /v1/cards/claim` — claim an enabled standard design; one copy per design per account.
-- `POST /v1/cards/activate` — redeem a single-use activation code.
-- `POST /v1/cards/feature` — set a card as featured.
-- `POST /v1/cards/transfers`, `POST /v1/cards/transfers/accept`, `POST /v1/cards/transfers/cancel` — ownership-transfer workflow.
-- `GET /v1/cards/verify?serial=FG-YYYY-XXXXXXXX` — public certificate verification.
-- `GET /v1/assets/:designId` — compact artwork.
-
-Authenticated API requests use `Authorization: Bearer <access_token>`. The token is held in iOS Keychain; D1 stores only a token hash. In Admin Studio, the new-design artwork editor previews a portrait 2:3 crop, supports dragging, zoom and reset, then uploads the final WebP crop compressed to at most 320 KiB. Artwork remains in D1; no external asset host is required.
-
-### Admin Studio
-Open `/admin` and use the `FOG_ADMIN_TOKEN` as a Bearer token:
-- `GET /v1/admin/overview`
-- `GET/POST /v1/admin/designs`; `PATCH /v1/admin/designs/:id`
-- `POST/PUT /v1/admin/designs/:id/art`
-- `POST /v1/admin/designs/:id/codes` — generate up to 100 limited-edition codes per request.
-- `GET /v1/admin/codes`; `POST /v1/admin/codes/:id/revoke`
-- `GET /v1/admin/cards?q=...`
-- `POST /v1/admin/cards/assign` and `POST /v1/admin/cards/transfer`
-- `GET /v1/admin/users?identifier=...` — accepts `@username` or a numeric Telegram ID; the legacy `telegram_id` query parameter remains supported.
-- `GET /v1/admin/activity`
-
-Raw activation codes are displayed once and never saved in D1. Limited designs reserve one edition slot per activation-code row; database triggers enforce the cap and one standard copy per user/design, including concurrent requests and ownership transfers. The card back displays a masked proof, not the activation code. The full certificate is HMAC-SHA-256 signed by the Worker.
-
-## Migration and deployment
-
-Review and back up the live D1 database before applying migrations; some initial live tables were originally created manually.
+From the repository root:
 
 ```sh
-npx wrangler d1 migrations apply fog-wallet-db --remote --config cloud/fog-wallet/wrangler.jsonc
 npx wrangler deploy --config cloud/fog-wallet/wrangler.jsonc
 ```
 
-First-card release order:
-1. Set `FOG_ADMIN_TOKEN` and `FOG_CARD_SIGNING_KEY` as Worker secrets.
-2. Apply migration `0003_cards_platform.sql` exactly once to the existing D1.
-3. Deploy the updated Worker and the `src/cards.js` and `src/admin.js` files.
-4. Open `/admin`, create a design and upload artwork.
-5. Have the intended owner install a compatible Biogram build and complete Fog Wallet → Connect through Telegram. Verify the linked account in Studio using `@username`; a numeric ID is also accepted when needed.
-6. Issue the first real card from Studio to that linked `@username`. A username lookup cannot replace the required successful Fog Wallet connection.
-7. Install the latest Biogram build and test catalogue, claim, activation, serial/proof, disconnect and reconnect.
-
-Do not manually insert a fake owned card as a seed. A card becomes real only after the service creates its ownership row and signed receipt. Run Worker/schema checks first, then dispatch one complete release-arm64 build after the code is grouped.
-
-## Security
-- Opt-in account link; no request for chats, contacts, or phone number.
-- OIDC uses state, nonce, PKCE S256, server-side code exchange and RS256 ID-token verification.
-- API sessions expire after 30 days. Disconnect revokes sessions but keeps card ownership and transfer history.
-- Activation attempts are limited to 10 failures per account per 10-minute bucket.
-- Admin routes require the admin Bearer token; the Studio stores it in sessionStorage for the current browser tab only.
-- A masked proof is a display element, not a transfer credential. Certificate verification is performed server-side.
-- Before wider release, test concurrency, replay, expiration, account mismatch, access control and backup/restore.
-
-
-## Native client notes
-
-The Biogram settings screen opens Fog Wallet only after the Keychain-backed account link exists. Collection and catalog JSON are cached locally for last-known/offline display; authentication tokens are never written to that cache. Catalog artwork is fetched only when a design provides an HTTPS artwork URL. The native client cannot issue cards unless the Worker, schema, signing secret and Admin Studio are configured.
+Do not add back the retired D1 binding, OAuth client secret or card-signing/admin secrets unless a new, reviewed feature explicitly needs them.
