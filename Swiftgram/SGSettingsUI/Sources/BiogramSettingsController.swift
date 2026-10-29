@@ -177,8 +177,9 @@ private enum BiogramSection: Int32 {
     case color = 3
     case collectibles = 4
     case banner = 5
-    case fogWallet = 6
-    case info = 7
+    case card = 6
+    case fogWallet = 7
+    case info = 8
 }
 
 private final class BiogramControllerState: Equatable {
@@ -189,6 +190,8 @@ private final class BiogramControllerState: Equatable {
     let profileColorEnabled: Bool
     let profileColor: BiogramProfileColor?
     let hasBanner: Bool
+    let profileCardStyle: BiogramProfileCardStyle
+    let hasCardImage: Bool
     let fogWalletConnected: Bool
    
     init(
@@ -199,6 +202,8 @@ private final class BiogramControllerState: Equatable {
         profileColorEnabled: Bool,
         profileColor: BiogramProfileColor?,
         hasBanner: Bool,
+        profileCardStyle: BiogramProfileCardStyle,
+        hasCardImage: Bool,
         fogWalletConnected: Bool
     ) {
         self.premiumEnabled = premiumEnabled
@@ -208,6 +213,8 @@ private final class BiogramControllerState: Equatable {
         self.profileColorEnabled = profileColorEnabled
         self.profileColor = profileColor
         self.hasBanner = hasBanner
+        self.profileCardStyle = profileCardStyle
+        self.hasCardImage = hasCardImage
         self.fogWalletConnected = fogWalletConnected
     }
    
@@ -219,6 +226,8 @@ private final class BiogramControllerState: Equatable {
             && lhs.profileColorEnabled == rhs.profileColorEnabled
             && lhs.profileColor == rhs.profileColor
             && lhs.hasBanner == rhs.hasBanner
+            && lhs.profileCardStyle == rhs.profileCardStyle
+            && lhs.hasCardImage == rhs.hasCardImage
             && lhs.fogWalletConnected == rhs.fogWalletConnected
     }
    
@@ -231,6 +240,8 @@ private final class BiogramControllerState: Equatable {
             profileColorEnabled: BiogramManager.shared.profileColorEnabled,
             profileColor: BiogramManager.shared.profileColor,
             hasBanner: BiogramManager.shared.banner() != nil,
+            profileCardStyle: BiogramManager.shared.profileCardStyle,
+            hasCardImage: BiogramManager.shared.profileCardImage() != nil,
             fogWalletConnected: FogWalletConnectionManager.shared.isConnected(accountId: accountId)
         )
     }
@@ -244,6 +255,7 @@ private enum BiogramEntryId: Hashable {
     case colorPattern(String), colorPatternOpacity
     case collectiblesHeader, collectible(String), addGiftFromLink
     case bannerHeader, bannerPreview, chooseBanner, removeBanner
+    case profileCardHeader, openProfileCard
     case fogWalletHeader, fogWalletStatus, openFogWallet, connectFogWallet, disconnectFogWallet, fogWalletInfo
     case info
 }
@@ -270,6 +282,8 @@ private enum BiogramEntry: ItemListNodeEntry {
     case bannerPreview(Bool)
     case chooseBanner
     case removeBanner
+    case profileCardHeader
+    case openProfileCard(BiogramProfileCardStyle, Bool)
     case fogWalletHeader
     case fogWalletStatus(Bool)
     case openFogWallet
@@ -287,6 +301,7 @@ private enum BiogramEntry: ItemListNodeEntry {
             return BiogramSection.color.rawValue
         case .collectiblesHeader, .collectible, .addGiftFromLink: return BiogramSection.collectibles.rawValue
         case .bannerHeader, .bannerPreview, .chooseBanner, .removeBanner: return BiogramSection.banner.rawValue
+        case .profileCardHeader, .openProfileCard: return BiogramSection.card.rawValue
         case .fogWalletHeader, .fogWalletStatus, .openFogWallet, .connectFogWallet, .disconnectFogWallet, .fogWalletInfo: return BiogramSection.fogWallet.rawValue
         case .info: return BiogramSection.info.rawValue
         }
@@ -315,6 +330,8 @@ private enum BiogramEntry: ItemListNodeEntry {
         case .bannerPreview: return .bannerPreview
         case .chooseBanner: return .chooseBanner
         case .removeBanner: return .removeBanner
+        case .profileCardHeader: return .profileCardHeader
+        case .openProfileCard: return .openProfileCard
         case .fogWalletHeader: return .fogWalletHeader
         case .fogWalletStatus: return .fogWalletStatus
         case .openFogWallet: return .openFogWallet
@@ -378,6 +395,11 @@ private enum BiogramEntry: ItemListNodeEntry {
             return ItemListActionItem(presentationData: presentationData, title: "Choose from Gallery", kind: .generic, alignment: .natural, sectionId: self.section, style: .blocks, action: { arguments.chooseBanner() })
         case .removeBanner:
             return ItemListActionItem(presentationData: presentationData, title: "Remove Banner", kind: .destructive, alignment: .natural, sectionId: self.section, style: .blocks, action: { arguments.removeBanner() })
+        case .profileCardHeader:
+            return ItemListSectionHeaderItem(presentationData: presentationData, text: "BIOGRAM PROFILE CARD", sectionId: self.section)
+        case let .openProfileCard(style, hasImage):
+            let imageLabel = hasImage ? "Custom artwork" : "Color material"
+            return ItemListDisclosureItem(presentationData: presentationData, title: "Customize 3D card", label: "\(style.paletteName) · \(style.material.capitalized) · \(imageLabel)", sectionId: self.section, style: .blocks, action: { arguments.openProfileCard() })
         case .fogWalletHeader:
             return ItemListSectionHeaderItem(presentationData: presentationData, text: "FOG WALLET", sectionId: self.section)
         case let .fogWalletStatus(connected):
@@ -412,6 +434,7 @@ private final class BiogramArguments {
     let addGiftFromLink: () -> Void
     let chooseBanner: () -> Void
     let removeBanner: () -> Void
+    let openProfileCard: () -> Void
     let openFogWallet: () -> Void
     let connectFogWallet: () -> Void
     let disconnectFogWallet: () -> Void
@@ -432,6 +455,7 @@ private final class BiogramArguments {
         addGiftFromLink: @escaping () -> Void,
         chooseBanner: @escaping () -> Void,
         removeBanner: @escaping () -> Void,
+        openProfileCard: @escaping () -> Void,
         openFogWallet: @escaping () -> Void,
         connectFogWallet: @escaping () -> Void,
         disconnectFogWallet: @escaping () -> Void
@@ -451,6 +475,7 @@ private final class BiogramArguments {
         self.addGiftFromLink = addGiftFromLink
         self.chooseBanner = chooseBanner
         self.removeBanner = removeBanner
+        self.openProfileCard = openProfileCard
         self.openFogWallet = openFogWallet
         self.connectFogWallet = connectFogWallet
         self.disconnectFogWallet = disconnectFogWallet
