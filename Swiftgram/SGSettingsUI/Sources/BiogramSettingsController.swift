@@ -1386,9 +1386,7 @@ private final class BiogramProfileCardDesignerController: ViewController {
         let _ = signal.start(next: { [weak self] peer in
             guard let self, let peer else { return }
             self.displayName = peer.compactDisplayTitle
-            if let username = peer.username, !username.isEmpty {
-                self.username = "@\(username)"
-            } else if let username = peer.usernames.first(where: { $0.flags.contains(.isActive) })?.username {
+            if let username = peer.usernames.first(where: { $0.flags.contains(.isActive) })?.username, !username.isEmpty {
                 self.username = "@\(username)"
             } else {
                 self.username = "@biogram"
