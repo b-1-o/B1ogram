@@ -466,13 +466,31 @@ private func telegramProfileColor(for color: BiogramProfileColor) -> PeerNameCol
 /// see the chosen color on the profile. The local RGB value is retained for the richer self preview.
 private func syncTelegramProfileColor(_ color: BiogramProfileColor?, context: AccountContext) {
     let mappedColor = color.map { telegramProfileColor(for: $0) }
-    let nameColor = mappedColor ?? .blue
-    let signal = context.engine.accountData.updateNameColorAndEmoji(
-        nameColor: .preset(color: nameColor, backgroundEmojiId: nil),
-        profileColor: mappedColor,
-        profileBackgroundEmojiId: nil
+    let peerSignal = context.engine.data.subscribe(
+        TelegramEngine.EngineData.Item.Peer.Peer(id: context.account.peerId)
     )
-    let _ = signal.start(error: { _ in }, completed: {})
+    |> take(1)
+    |> deliverOnMainQueue
+
+    let _ = peerSignal.start(next: { peer in
+        guard let peer else { return }
+
+        // Keep the user's existing name color and background emoji intact.
+        let nameColor: UpdateNameColor
+        switch peer.nameColor ?? .preset(.blue) {
+        case let .preset(existingColor):
+            nameColor = .preset(color: existingColor, backgroundEmojiId: peer.backgroundEmojiId)
+        case let .collectible(collectibleColor):
+            nameColor = .collectible(collectibleColor)
+        }
+
+        let update = context.engine.accountData.updateNameColorAndEmoji(
+            nameColor: nameColor,
+            profileColor: mappedColor,
+            profileBackgroundEmojiId: nil
+        )
+        let _ = update.start(error: { _ in }, completed: {})
+    })
 }
 
 private func biogramControllerEntries(state: BiogramControllerState) -> [BiogramEntry] {
