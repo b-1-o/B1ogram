@@ -390,7 +390,7 @@ async function telegramCallback(request, env) {
       : "The authorization response was invalid. No account was linked. Return to Biogram and start again.", 400);
   }
 
- {
+  if (!env.TELEGRAM_CLIENT_ID || !/^\d{5,20}$/.test(env.TELEGRAM_CLIENT_ID) || !env.TELEGRAM_CLIENT_SECRET) {
     await markFlowFailed(env, stateHash, "telegram_login_not_configured");
     return htmlPage("Connection unavailable", "Fog Wallet sign-in has not been configured yet. Return to Biogram later.", 503);
   }
