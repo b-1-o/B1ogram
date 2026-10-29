@@ -413,7 +413,7 @@ private enum BiogramEntry: ItemListNodeEntry {
         case .fogWalletInfo:
             return ItemListTextItem(presentationData: presentationData, text: .plain("Cards are stored in Fog Wallet and shown here when you open the collection. Linking does not grant access to chats, contacts, or your phone number. You can disconnect at any time."), sectionId: self.section)
         case .info:
-            return ItemListTextItem(presentationData: presentationData, text: .plain("Local-only. Visible only in this client. Not sent to Telegram servers. Banner uses original image aspect ratio."), sectionId: self.section)
+            return ItemListTextItem(presentationData: presentationData, text: .plain("Profile color uses Telegram's profile-color system so other users can see it. Your custom card artwork and material are saved on this device. Tap the card to flip it; drag to tilt it in 3D."), sectionId: self.section)
         }
     }
 }
@@ -480,6 +480,39 @@ private final class BiogramArguments {
         self.connectFogWallet = connectFogWallet
         self.disconnectFogWallet = disconnectFogWallet
     }
+}
+
+private func telegramProfileColor(for color: BiogramProfileColor) -> PeerNameColor {
+    let r = color.r
+    let g = color.g
+    let b = color.b
+    let candidates: [(Double, Double, Double, PeerNameColor)] = [
+        (0.84, 0.20, 0.25, .red),
+        (0.96, 0.52, 0.18, .orange),
+        (0.57, 0.31, 0.86, .violet),
+        (0.20, 0.65, 0.42, .green),
+        (0.10, 0.68, 0.75, .cyan),
+        (0.28, 0.49, 0.93, .blue),
+        (0.91, 0.32, 0.60, .pink)
+    ]
+    return candidates.min(by: { lhs, rhs in
+        let ld = pow(r - lhs.0, 2) + pow(g - lhs.1, 2) + pow(b - lhs.2, 2)
+        let rd = pow(r - rhs.0, 2) + pow(g - rhs.1, 2) + pow(b - rhs.2, 2)
+        return ld < rd
+    })?.3 ?? .blue
+}
+
+/// Profile accents are written to Telegram's own profile-color API so other Telegram/Biogram users
+/// see the chosen color on the profile. The local RGB value is retained for the richer self preview.
+private func syncTelegramProfileColor(_ color: BiogramProfileColor?, context: AccountContext) {
+    let mappedColor = color.map { telegramProfileColor(for: $0) }
+    let nameColor = mappedColor ?? .blue
+    let signal = context.engine.accountData.updateNameColorAndEmoji(
+        nameColor: .preset(color: nameColor, backgroundEmojiId: nil),
+        profileColor: mappedColor,
+        profileBackgroundEmojiId: nil
+    )
+    let _ = signal.start(error: { _ in }, completed: {})
 }
 
 private func biogramControllerEntries(state: BiogramControllerState) -> [BiogramEntry] {
@@ -667,6 +700,7 @@ public func biogramSettingsController(context: AccountContext) -> ViewController
             BiogramManager.shared.setProfileColor(current, enabled: enabled) {
                 Queue.mainQueue().async { updateState() }
             }
+            syncTelegramProfileColor(enabled ? current : nil, context: context)
         },
         selectPreset: { color in
             let existing = BiogramManager.shared.profileColor
@@ -681,6 +715,7 @@ public func biogramSettingsController(context: AccountContext) -> ViewController
             BiogramManager.shared.setProfileColor(newColor, enabled: true) {
                 Queue.mainQueue().async { updateState() }
             }
+            syncTelegramProfileColor(newColor, context: context)
         },
         setBrightness: { value in
             guard var color = BiogramManager.shared.profileColor else { return }
@@ -765,6 +800,13 @@ public func biogramSettingsController(context: AccountContext) -> ViewController
                 Queue.mainQueue().async { updateState() }
             }
         },
+        openProfileCard: {
+            presentControllerImpl?(BiogramProfileCardDesignerController(
+                context: context,
+                accountId: accountId,
+                userId: fogWalletAccountId
+            ), nil)
+        },
         openFogWallet: {
             presentControllerImpl?(FogWalletCardsViewController(accountId: fogWalletAccountId), nil)
         },
@@ -840,23 +882,6 @@ public func biogramSettingsController(context: AccountContext) -> ViewController
         controller?.present(c, in: .window(.root), with: a)
     }
 
-    let promptKey = "fogWalletConnectPromptShown.\(fogWalletAccountId)"
-    if !initialState.fogWalletConnected && !UserDefaults.standard.bool(forKey: promptKey) {
-        UserDefaults.standard.set(true, forKey: promptKey)
-        Queue.mainQueue().after(0.6) { [weak controller] in
-            guard controller != nil else { return }
-            let invitation = BiogramActionsAlertController(
-                title: "Connect Fog Wallet?",
-                message: "Connect Fog Wallet to view your card collection and claim cards in Biogram. Telegram confirms the account. Fog Wallet does not request your phone number, chats, or contacts. Connecting is optional, and you can disconnect any time in Biogram settings.",
-                actions: [
-                    (title: "Connect", destructive: false, action: {
-                        startFogWalletConnection()
-                    })
-                ]
-            )
-            presentControllerImpl?(invitation, nil)
-        }
-    }
     return controller
 }
 // MARK: - Fog Wallet cards
