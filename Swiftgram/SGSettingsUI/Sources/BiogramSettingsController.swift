@@ -484,18 +484,7 @@ private final class BiogramArguments {
 
 private func biogramControllerEntries(state: BiogramControllerState) -> [BiogramEntry] {
     var entries: [BiogramEntry] = []
-   
-    entries.append(.premiumHeader)
-    entries.append(.premiumToggle(state.premiumEnabled))
-   
-    entries.append(.numbersHeader)
-    for (i, n) in state.numbers.enumerated() { entries.append(.number(i, n)) }
-    entries.append(.addNumber)
-   
-    entries.append(.aliasesHeader)
-    for (i, a) in state.aliases.enumerated() { entries.append(.alias(i, a)) }
-    entries.append(.addAlias)
-   
+
     entries.append(.colorHeader)
     entries.append(.colorToggle(state.profileColorEnabled))
     if state.profileColorEnabled {
@@ -508,7 +497,6 @@ private func biogramControllerEntries(state: BiogramControllerState) -> [Biogram
             entries.append(.colorPreset(name, preset, selected))
         }
         entries.append(.colorBrightness(current?.brightness ?? 1.0))
-       
         let currentPattern = current?.pattern ?? "none"
         for (title, key) in BiogramProfileColor.patterns {
             entries.append(.colorPattern(title, key, currentPattern == key))
@@ -517,12 +505,7 @@ private func biogramControllerEntries(state: BiogramControllerState) -> [Biogram
             entries.append(.colorPatternOpacity(current?.patternOpacity ?? 0.25))
         }
     }
-   
-    entries.append(.collectiblesHeader)
-    for (i, c) in state.collectibles.enumerated() { entries.append(.collectible(i, c)) }
-    entries.append(.addGiftFromLink)
-   
-    // Banner — без ручной высоты, aspect ratio берётся из картинки (free)
+
     entries.append(.bannerHeader)
     entries.append(.bannerPreview(state.hasBanner))
     entries.append(.chooseBanner)
@@ -530,15 +513,8 @@ private func biogramControllerEntries(state: BiogramControllerState) -> [Biogram
         entries.append(.removeBanner)
     }
 
-    entries.append(.fogWalletHeader)
-    entries.append(.fogWalletStatus(state.fogWalletConnected))
-    if state.fogWalletConnected {
-        entries.append(.openFogWallet)
-        entries.append(.disconnectFogWallet)
-    } else {
-        entries.append(.connectFogWallet)
-    }
-    entries.append(.fogWalletInfo)
+    entries.append(.profileCardHeader)
+    entries.append(.openProfileCard(state.profileCardStyle, state.hasCardImage))
 
     entries.append(.info)
     return entries
