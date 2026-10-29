@@ -178,7 +178,6 @@ private enum BiogramSection: Int32 {
     case collectibles = 4
     case banner = 5
     case card = 6
-    case fogWallet = 7
     case info = 8
 }
 
@@ -192,7 +191,6 @@ private final class BiogramControllerState: Equatable {
     let hasBanner: Bool
     let profileCardStyle: BiogramProfileCardStyle
     let hasCardImage: Bool
-    let fogWalletConnected: Bool
    
     init(
         premiumEnabled: Bool,
@@ -204,7 +202,6 @@ private final class BiogramControllerState: Equatable {
         hasBanner: Bool,
         profileCardStyle: BiogramProfileCardStyle,
         hasCardImage: Bool,
-        fogWalletConnected: Bool
     ) {
         self.premiumEnabled = premiumEnabled
         self.numbers = numbers
@@ -215,7 +212,6 @@ private final class BiogramControllerState: Equatable {
         self.hasBanner = hasBanner
         self.profileCardStyle = profileCardStyle
         self.hasCardImage = hasCardImage
-        self.fogWalletConnected = fogWalletConnected
     }
    
     static func == (lhs: BiogramControllerState, rhs: BiogramControllerState) -> Bool {
@@ -228,10 +224,9 @@ private final class BiogramControllerState: Equatable {
             && lhs.hasBanner == rhs.hasBanner
             && lhs.profileCardStyle == rhs.profileCardStyle
             && lhs.hasCardImage == rhs.hasCardImage
-            && lhs.fogWalletConnected == rhs.fogWalletConnected
     }
    
-    static func current(accountId: String) -> BiogramControllerState {
+    static func current() -> BiogramControllerState {
         return BiogramControllerState(
             premiumEnabled: BiogramManager.shared.localPremiumEnabled,
             numbers: BiogramManager.shared.virtualNumbers(),
@@ -242,7 +237,6 @@ private final class BiogramControllerState: Equatable {
             hasBanner: BiogramManager.shared.banner() != nil,
             profileCardStyle: BiogramManager.shared.profileCardStyle,
             hasCardImage: BiogramManager.shared.profileCardImage() != nil,
-            fogWalletConnected: FogWalletConnectionManager.shared.isConnected(accountId: accountId)
         )
     }
 }
@@ -256,7 +250,6 @@ private enum BiogramEntryId: Hashable {
     case collectiblesHeader, collectible(String), addGiftFromLink
     case bannerHeader, bannerPreview, chooseBanner, removeBanner
     case profileCardHeader, openProfileCard
-    case fogWalletHeader, fogWalletStatus, openFogWallet, connectFogWallet, disconnectFogWallet, fogWalletInfo
     case info
 }
 
@@ -284,12 +277,6 @@ private enum BiogramEntry: ItemListNodeEntry {
     case removeBanner
     case profileCardHeader
     case openProfileCard(BiogramProfileCardStyle, Bool)
-    case fogWalletHeader
-    case fogWalletStatus(Bool)
-    case openFogWallet
-    case connectFogWallet
-    case disconnectFogWallet
-    case fogWalletInfo
     case info
    
     var section: ItemListSectionId {
@@ -302,7 +289,6 @@ private enum BiogramEntry: ItemListNodeEntry {
         case .collectiblesHeader, .collectible, .addGiftFromLink: return BiogramSection.collectibles.rawValue
         case .bannerHeader, .bannerPreview, .chooseBanner, .removeBanner: return BiogramSection.banner.rawValue
         case .profileCardHeader, .openProfileCard: return BiogramSection.card.rawValue
-        case .fogWalletHeader, .fogWalletStatus, .openFogWallet, .connectFogWallet, .disconnectFogWallet, .fogWalletInfo: return BiogramSection.fogWallet.rawValue
         case .info: return BiogramSection.info.rawValue
         }
     }
@@ -332,12 +318,6 @@ private enum BiogramEntry: ItemListNodeEntry {
         case .removeBanner: return .removeBanner
         case .profileCardHeader: return .profileCardHeader
         case .openProfileCard: return .openProfileCard
-        case .fogWalletHeader: return .fogWalletHeader
-        case .fogWalletStatus: return .fogWalletStatus
-        case .openFogWallet: return .openFogWallet
-        case .connectFogWallet: return .connectFogWallet
-        case .disconnectFogWallet: return .disconnectFogWallet
-        case .fogWalletInfo: return .fogWalletInfo
         case .info: return .info
         }
     }
@@ -400,18 +380,6 @@ private enum BiogramEntry: ItemListNodeEntry {
         case let .openProfileCard(style, hasImage):
             let imageLabel = hasImage ? "Custom artwork" : "Color material"
             return ItemListDisclosureItem(presentationData: presentationData, title: "Customize 3D card", label: "\(style.paletteName) · \(style.material.capitalized) · \(imageLabel)", sectionId: self.section, style: .blocks, action: { arguments.openProfileCard() })
-        case .fogWalletHeader:
-            return ItemListSectionHeaderItem(presentationData: presentationData, text: "FOG WALLET", sectionId: self.section)
-        case let .fogWalletStatus(connected):
-            return ItemListDisclosureItem(presentationData: presentationData, title: "Cloud connection", label: connected ? "Connected" : "Not connected", sectionId: self.section, style: .blocks, action: nil)
-        case .openFogWallet:
-            return ItemListActionItem(presentationData: presentationData, title: "Open card collection", kind: .generic, alignment: .natural, sectionId: self.section, style: .blocks, action: { arguments.openFogWallet() })
-        case .connectFogWallet:
-            return ItemListActionItem(presentationData: presentationData, title: "Connect Fog Wallet", kind: .generic, alignment: .natural, sectionId: self.section, style: .blocks, action: { arguments.connectFogWallet() })
-        case .disconnectFogWallet:
-            return ItemListActionItem(presentationData: presentationData, title: "Disconnect Fog Wallet", kind: .destructive, alignment: .natural, sectionId: self.section, style: .blocks, action: { arguments.disconnectFogWallet() })
-        case .fogWalletInfo:
-            return ItemListTextItem(presentationData: presentationData, text: .plain("Cards are stored in Fog Wallet and shown here when you open the collection. Linking does not grant access to chats, contacts, or your phone number. You can disconnect at any time."), sectionId: self.section)
         case .info:
             return ItemListTextItem(presentationData: presentationData, text: .plain("Profile color uses Telegram's profile-color system so other users can see it. Your custom card artwork and material are saved on this device. Tap the card to flip it; drag to tilt it in 3D."), sectionId: self.section)
         }
@@ -435,9 +403,6 @@ private final class BiogramArguments {
     let chooseBanner: () -> Void
     let removeBanner: () -> Void
     let openProfileCard: () -> Void
-    let openFogWallet: () -> Void
-    let connectFogWallet: () -> Void
-    let disconnectFogWallet: () -> Void
    
     init(
         togglePremium: @escaping (Bool) -> Void,
@@ -455,10 +420,7 @@ private final class BiogramArguments {
         addGiftFromLink: @escaping () -> Void,
         chooseBanner: @escaping () -> Void,
         removeBanner: @escaping () -> Void,
-        openProfileCard: @escaping () -> Void,
-        openFogWallet: @escaping () -> Void,
-        connectFogWallet: @escaping () -> Void,
-        disconnectFogWallet: @escaping () -> Void
+        openProfileCard: @escaping () -> Void
     ) {
         self.togglePremium = togglePremium
         self.addNumber = addNumber
@@ -476,9 +438,6 @@ private final class BiogramArguments {
         self.chooseBanner = chooseBanner
         self.removeBanner = removeBanner
         self.openProfileCard = openProfileCard
-        self.openFogWallet = openFogWallet
-        self.connectFogWallet = connectFogWallet
-        self.disconnectFogWallet = disconnectFogWallet
     }
 }
 
@@ -557,13 +516,13 @@ private func biogramControllerEntries(state: BiogramControllerState) -> [Biogram
 public func biogramSettingsController(context: AccountContext) -> ViewController {
     // Preserve the existing Biogram account key for its local preferences.
     let accountId = String(context.account.peerId.toInt64())
-    // Use Telegram's raw user ID only for Fog Wallet's explicit account-link check.
+    // Use Telegram's raw numeric account ID for the decorative card signature.
     let fogWalletAccountId = String(context.account.peerId.id._internalGetInt64Value())
-    let initialState = BiogramControllerState.current(accountId: fogWalletAccountId)
+    let initialState = BiogramControllerState.current()
     let statePromise = ValuePromise(initialState, ignoreRepeated: true)
     let stateValue = Atomic(value: initialState)
     let updateState: (() -> Void) = {
-        let newState = BiogramControllerState.current(accountId: fogWalletAccountId)
+        let newState = BiogramControllerState.current()
         _ = stateValue.swap(newState)
         statePromise.set(newState)
     }
@@ -573,38 +532,6 @@ public func biogramSettingsController(context: AccountContext) -> ViewController
     }
     // =====================================================================
     var presentControllerImpl: ((ViewController, Any?) -> Void)?
-
-    let startFogWalletConnection: () -> Void = {
-        let telegramUserId = String(context.account.peerId.id._internalGetInt64Value())
-        FogWalletConnectionManager.shared.connect(
-            telegramUserId: telegramUserId,
-            accountId: fogWalletAccountId,
-            presentBrowser: { browser in
-                presentControllerImpl?(browser, nil)
-            },
-            completion: { result in
-                Queue.mainQueue().async {
-                    updateState()
-                    switch result {
-                    case .success:
-                        let alert = BiogramActionsAlertController(
-                            title: "Fog Wallet connected",
-                            message: "Your Telegram account is linked. Open the Fog Wallet collection from Biogram settings to view and claim cards.",
-                            actions: []
-                        )
-                        presentControllerImpl?(alert, nil)
-                    case let .failure(error):
-                        let alert = BiogramActionsAlertController(
-                            title: "Could not connect",
-                            message: error.localizedDescription,
-                            actions: []
-                        )
-                        presentControllerImpl?(alert, nil)
-                    }
-                }
-            }
-        )
-    }
 
     let arguments = BiogramArguments(
         togglePremium: { enabled in
@@ -807,57 +734,6 @@ public func biogramSettingsController(context: AccountContext) -> ViewController
                 accountId: accountId,
                 userId: fogWalletAccountId
             ), nil)
-        },
-        openFogWallet: {
-            presentControllerImpl?(BiogramProfileCardDesignerController(
-                context: context,
-                accountId: accountId,
-                userId: fogWalletAccountId
-            ), nil)
-        },
-        connectFogWallet: {
-            let confirmation = BiogramActionsAlertController(
-                title: "Connect Fog Wallet?",
-                message: "Telegram will confirm that the account already open in Biogram is yours. Fog Wallet stores a minimal account link and a revocable session. It does not request your phone number, chats, contacts, or permission for a bot to message you. Continue?",
-                actions: [
-                    (title: "Continue to Telegram", destructive: false, action: {
-                        startFogWalletConnection()
-                    })
-                ]
-            )
-            presentControllerImpl?(confirmation, nil)
-        },
-        disconnectFogWallet: {
-            let confirmation = BiogramActionsAlertController(
-                title: "Disconnect Fog Wallet?",
-                message: "This revokes Fog Wallet sessions on the server and stops this app from using the connection. Issued-card records and transfer history, if any, are not deleted.",
-                actions: [
-                    (title: "Disconnect", destructive: true, action: {
-                        FogWalletConnectionManager.shared.disconnect(accountId: fogWalletAccountId) { result in
-                            Queue.mainQueue().async {
-                                updateState()
-                                switch result {
-                                case .success:
-                                    let alert = BiogramActionsAlertController(
-                                        title: "Fog Wallet disconnected",
-                                        message: "This Biogram app can no longer use the saved Fog Wallet session.",
-                                        actions: []
-                                    )
-                                    presentControllerImpl?(alert, nil)
-                                case let .failure(error):
-                                    let alert = BiogramActionsAlertController(
-                                        title: "Could not disconnect",
-                                        message: error.localizedDescription,
-                                        actions: []
-                                    )
-                                    presentControllerImpl?(alert, nil)
-                                }
-                            }
-                        }
-                    })
-                ]
-            )
-            presentControllerImpl?(confirmation, nil)
         }
     )
    
