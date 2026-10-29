@@ -808,7 +808,11 @@ public func biogramSettingsController(context: AccountContext) -> ViewController
             ), nil)
         },
         openFogWallet: {
-            presentControllerImpl?(FogWalletCardsViewController(accountId: fogWalletAccountId), nil)
+            presentControllerImpl?(BiogramProfileCardDesignerController(
+                context: context,
+                accountId: accountId,
+                userId: fogWalletAccountId
+            ), nil)
         },
         connectFogWallet: {
             let confirmation = BiogramActionsAlertController(
@@ -899,225 +903,403 @@ private func fogWalletColor(_ hex: String) -> UIColor {
     )
 }
 
-private final class FogWalletActionButton: UIButton {
-    var handler: (() -> Void)?
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        self.addTarget(self, action: #selector(runHandler), for: .touchUpInside)
-        self.titleLabel?.font = UIFont.systemFont(ofSize: 14, weight: .semibold)
-        self.layer.cornerRadius = 13
-        self.layer.masksToBounds = true
-        self.contentEdgeInsets = UIEdgeInsets(top: 11, left: 15, bottom: 11, right: 15)
-    }
-    required init?(coder: NSCoder) { fatalError() }
-    @objc private func runHandler() { self.handler?() }
+private func biogramCardColor(_ hex: String) -> UIColor {
+    var value = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+    if value.count != 6 { value = "171719" }
+    var rgb: UInt64 = 0
+    Scanner(string: value).scanHexInt64(&rgb)
+    return UIColor(
+        red: CGFloat((rgb >> 16) & 0xff) / 255.0,
+        green: CGFloat((rgb >> 8) & 0xff) / 255.0,
+        blue: CGFloat(rgb & 0xff) / 255.0,
+        alpha: 1.0
+    )
 }
 
-private final class FogPremiumCardView: UIControl {
-    private let gradient = CAGradientLayer()
-    private let artworkView = UIImageView()
-    private let overlayView = UIView()
-    private let overlayGradient = CAGradientLayer()
-    private let faceView = UIView()
-    private var card: [String: Any] = [:]
-    private var design: [String: Any] = [:]
+private func biogramCardPalette(_ name: String) -> (UIColor, UIColor) {
+    let preset = BiogramProfileColor.presets.first(where: { $0.0 == name })?.1
+        ?? BiogramProfileColor.presets.first(where: { $0.0 == "Dark Red" })!.1
+    let main = UIColor(
+        red: CGFloat(preset.r),
+        green: CGFloat(preset.g),
+        blue: CGFloat(preset.b),
+        alpha: 1.0
+    )
+    let shade = UIColor(
+        red: CGFloat(preset.r * 0.52),
+        green: CGFloat(preset.g * 0.52),
+        blue: CGFloat(preset.b * 0.58),
+        alpha: 1.0
+    )
+    return (main, shade)
+}
+
+private func biogramCardSignature(_ userId: String) -> String {
+    var hash: UInt64 = 1469598103934665603
+    for byte in userId.utf8 {
+        hash = (hash ^ UInt64(byte)) &* 1099511628211
+    }
+    return String(format: "B1O  ·  %04X  ·  %04X  ·  %04X", (hash >> 32) & 0xffff, (hash >> 16) & 0xffff, hash & 0xffff)
+}
+
+private final class Biogram3DProfileCardView: UIView {
+    private let cardContainer = UIView()
+    private let front = UIView()
+    private let back = UIView()
+    private let frontGradient = CAGradientLayer()
+    private let frontArtwork = UIImageView()
+    private let frontSheen = CAGradientLayer()
+    private let backGradient = CAGradientLayer()
+    private let backSheen = CAGradientLayer()
+    private let brandLabel = UILabel()
+    private let editionLabel = UILabel()
+    private let chipView = UIView()
+    private let nameLabel = UILabel()
+    private let handleLabel = UILabel()
+    private let frontSignatureLabel = UILabel()
+    private let backTitleLabel = UILabel()
+    private let backHandleLabel = UILabel()
+    private let backIdLabel = UILabel()
+    private let backSignatureLabel = UILabel()
+    private let backFooterLabel = UILabel()
+    private var style = BiogramProfileCardStyle()
+    private var userName = "BIOGRAM MEMBER"
+    private var userHandle = "@biogram"
+    private var userId = "—"
     private var showingBack = false
+    private var tiltX: CGFloat = 0.0
+    private var tiltY: CGFloat = 0.0
+    private var panOrigin = CGPoint.zero
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        self.layer.cornerRadius = 25
-        self.layer.borderWidth = 1
-        self.layer.borderColor = UIColor.white.withAlphaComponent(0.23).cgColor
-        self.layer.shadowColor = UIColor.black.cgColor
-        self.layer.shadowOpacity = 0.38
-        self.layer.shadowRadius = 18
-        self.layer.shadowOffset = CGSize(width: 0, height: 11)
-        self.layer.masksToBounds = false
-        self.layer.insertSublayer(self.gradient, at: 0)
-        self.artworkView.contentMode = .scaleAspectFill
-        self.artworkView.clipsToBounds = true
-        self.artworkView.layer.cornerRadius = 24
-        self.artworkView.isUserInteractionEnabled = false
-        self.addSubview(self.artworkView)
-        self.overlayView.isUserInteractionEnabled = false
-        self.overlayGradient.colors = [
-            UIColor.black.withAlphaComponent(0.10).cgColor,
-            UIColor.black.withAlphaComponent(0.26).cgColor,
-            UIColor.black.withAlphaComponent(0.82).cgColor
-        ]
-        self.overlayGradient.locations = [0.0, 0.48, 1.0]
-        self.overlayView.layer.addSublayer(self.overlayGradient)
-        self.addSubview(self.overlayView)
-        self.faceView.backgroundColor = .clear
-        self.faceView.isUserInteractionEnabled = false
-        self.addSubview(self.faceView)
-        self.addTarget(self, action: #selector(toggleFace), for: .touchUpInside)
+        self.isUserInteractionEnabled = true
+        self.cardContainer.layer.cornerRadius = 25
+        self.cardContainer.layer.masksToBounds = false
+        self.cardContainer.layer.shadowColor = UIColor.black.cgColor
+        self.cardContainer.layer.shadowOpacity = 0.42
+        self.cardContainer.layer.shadowRadius = 24
+        self.cardContainer.layer.shadowOffset = CGSize(width: 0, height: 14)
+        self.addSubview(self.cardContainer)
+
+        for face in [self.front, self.back] {
+            face.layer.cornerRadius = 25
+            face.layer.masksToBounds = true
+            face.layer.borderWidth = 1
+            face.layer.borderColor = UIColor.white.withAlphaComponent(0.30).cgColor
+            face.layer.isDoubleSided = false
+            self.cardContainer.addSubview(face)
+        }
+        self.back.transform = CATransform3DMakeRotation(.pi, 0.0, 1.0, 0.0)
+
+        self.frontGradient.startPoint = CGPoint(x: 0.0, y: 0.0)
+        self.frontGradient.endPoint = CGPoint(x: 1.0, y: 1.0)
+        self.front.layer.insertSublayer(self.frontGradient, at: 0)
+
+        self.frontArtwork.contentMode = .scaleAspectFill
+        self.frontArtwork.clipsToBounds = true
+        self.frontArtwork.isUserInteractionEnabled = false
+        self.front.addSubview(self.frontArtwork)
+
+        self.frontSheen.startPoint = CGPoint(x: 0.0, y: 0.0)
+        self.frontSheen.endPoint = CGPoint(x: 1.0, y: 1.0)
+        self.frontSheen.locations = [0.0, 0.42, 0.6, 1.0]
+        let frontSheenHost = UIView()
+        frontSheenHost.isUserInteractionEnabled = false
+        frontSheenHost.layer.addSublayer(self.frontSheen)
+        self.front.addSubview(frontSheenHost)
+        frontSheenHost.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            frontSheenHost.topAnchor.constraint(equalTo: self.front.topAnchor),
+            frontSheenHost.leadingAnchor.constraint(equalTo: self.front.leadingAnchor),
+            frontSheenHost.trailingAnchor.constraint(equalTo: self.front.trailingAnchor),
+            frontSheenHost.bottomAnchor.constraint(equalTo: self.front.bottomAnchor)
+        ])
+
+        self.brandLabel.text = "BIOGRAM"
+        self.brandLabel.font = UIFont.systemFont(ofSize: 12, weight: .heavy)
+        self.brandLabel.textColor = UIColor.white.withAlphaComponent(0.96)
+        self.front.addSubview(self.brandLabel)
+
+        self.editionLabel.text = "PRIVATE PROFILE"
+        self.editionLabel.font = UIFont.monospacedSystemFont(ofSize: 8, weight: .semibold)
+        self.editionLabel.textColor = UIColor.white.withAlphaComponent(0.76)
+        self.editionLabel.textAlignment = .right
+        self.front.addSubview(self.editionLabel)
+
+        self.chipView.backgroundColor = UIColor.white.withAlphaComponent(0.15)
+        self.chipView.layer.cornerRadius = 7
+        self.chipView.layer.borderWidth = 1
+        self.chipView.layer.borderColor = UIColor.white.withAlphaComponent(0.58).cgColor
+        self.chipView.isUserInteractionEnabled = false
+        self.front.addSubview(self.chipView)
+        for fraction in [CGFloat(0.33), CGFloat(0.66)] {
+            let line = UIView()
+            line.backgroundColor = UIColor.white.withAlphaComponent(0.34)
+            self.chipView.addSubview(line)
+            line.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                line.topAnchor.constraint(equalTo: self.chipView.topAnchor, constant: 4),
+                line.bottomAnchor.constraint(equalTo: self.chipView.bottomAnchor, constant: -4),
+                line.widthAnchor.constraint(equalToConstant: 1),
+                line.leadingAnchor.constraint(equalTo: self.chipView.leadingAnchor, constant: 44 * fraction)
+            ])
+        }
+
+        self.nameLabel.font = UIFont.systemFont(ofSize: 21, weight: .semibold)
+        self.nameLabel.textColor = .white
+        self.nameLabel.adjustsFontSizeToFitWidth = true
+        self.nameLabel.minimumScaleFactor = 0.72
+        self.front.addSubview(self.nameLabel)
+
+        self.handleLabel.font = UIFont.systemFont(ofSize: 11, weight: .medium)
+        self.handleLabel.textColor = UIColor.white.withAlphaComponent(0.75)
+        self.front.addSubview(self.handleLabel)
+
+        self.frontSignatureLabel.font = UIFont.monospacedSystemFont(ofSize: 9, weight: .medium)
+        self.frontSignatureLabel.textColor = UIColor.white.withAlphaComponent(0.75)
+        self.front.addSubview(self.frontSignatureLabel)
+
+        self.backGradient.startPoint = CGPoint(x: 0, y: 0)
+        self.backGradient.endPoint = CGPoint(x: 1, y: 1)
+        self.back.layer.insertSublayer(self.backGradient, at: 0)
+        self.backSheen.startPoint = CGPoint(x: 0.0, y: 0.2)
+        self.backSheen.endPoint = CGPoint(x: 1.0, y: 0.8)
+        self.back.layer.addSublayer(self.backSheen)
+
+        self.backTitleLabel.text = "BIOGRAM  /  PROFILE"
+        self.backTitleLabel.font = UIFont.monospacedSystemFont(ofSize: 10, weight: .bold)
+        self.backTitleLabel.textColor = UIColor.white.withAlphaComponent(0.74)
+        self.back.addSubview(self.backTitleLabel)
+
+        self.backHandleLabel.font = UIFont.systemFont(ofSize: 17, weight: .semibold)
+        self.backHandleLabel.textColor = .white
+        self.backHandleLabel.adjustsFontSizeToFitWidth = true
+        self.backHandleLabel.minimumScaleFactor = 0.75
+        self.back.addSubview(self.backHandleLabel)
+
+        self.backIdLabel.font = UIFont.monospacedSystemFont(ofSize: 11, weight: .medium)
+        self.backIdLabel.textColor = UIColor.white.withAlphaComponent(0.78)
+        self.back.addSubview(self.backIdLabel)
+
+        self.backSignatureLabel.font = UIFont.monospacedSystemFont(ofSize: 12, weight: .semibold)
+        self.backSignatureLabel.textColor = biogramCardColor("#E8D9C4")
+        self.back.addSubview(self.backSignatureLabel)
+
+        self.backFooterLabel.text = "PROFILE SIGNATURE  ·  NOT A PAYMENT CARD"
+        self.backFooterLabel.font = UIFont.monospacedSystemFont(ofSize: 7.5, weight: .medium)
+        self.backFooterLabel.textColor = UIColor.white.withAlphaComponent(0.55)
+        self.backFooterLabel.adjustsFontSizeToFitWidth = true
+        self.backFooterLabel.minimumScaleFactor = 0.7
+        self.back.addSubview(self.backFooterLabel)
+
+        for view in [
+            self.brandLabel, self.editionLabel, self.chipView, self.nameLabel,
+            self.handleLabel, self.frontSignatureLabel, self.backTitleLabel,
+            self.backHandleLabel, self.backIdLabel, self.backSignatureLabel, self.backFooterLabel
+        ] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+        }
+
+        NSLayoutConstraint.activate([
+            self.brandLabel.topAnchor.constraint(equalTo: self.front.topAnchor, constant: 20),
+            self.brandLabel.leadingAnchor.constraint(equalTo: self.front.leadingAnchor, constant: 22),
+            self.editionLabel.centerYAnchor.constraint(equalTo: self.brandLabel.centerYAnchor),
+            self.editionLabel.trailingAnchor.constraint(equalTo: self.front.trailingAnchor, constant: -22),
+            self.editionLabel.leadingAnchor.constraint(greaterThanOrEqualTo: self.brandLabel.trailingAnchor, constant: 8),
+
+            self.chipView.topAnchor.constraint(equalTo: self.brandLabel.bottomAnchor, constant: 22),
+            self.chipView.leadingAnchor.constraint(equalTo: self.front.leadingAnchor, constant: 22),
+            self.chipView.widthAnchor.constraint(equalToConstant: 44),
+            self.chipView.heightAnchor.constraint(equalToConstant: 32),
+
+            self.nameLabel.leadingAnchor.constraint(equalTo: self.front.leadingAnchor, constant: 22),
+            self.nameLabel.trailingAnchor.constraint(equalTo: self.front.trailingAnchor, constant: -22),
+            self.nameLabel.bottomAnchor.constraint(equalTo: self.handleLabel.topAnchor, constant: -2),
+            self.handleLabel.leadingAnchor.constraint(equalTo: self.front.leadingAnchor, constant: 22),
+            self.handleLabel.trailingAnchor.constraint(equalTo: self.front.trailingAnchor, constant: -22),
+            self.handleLabel.bottomAnchor.constraint(equalTo: self.frontSignatureLabel.topAnchor, constant: -13),
+            self.frontSignatureLabel.leadingAnchor.constraint(equalTo: self.front.leadingAnchor, constant: 22),
+            self.frontSignatureLabel.trailingAnchor.constraint(equalTo: self.front.trailingAnchor, constant: -22),
+            self.frontSignatureLabel.bottomAnchor.constraint(equalTo: self.front.bottomAnchor, constant: -18),
+
+            self.backTitleLabel.topAnchor.constraint(equalTo: self.back.topAnchor, constant: 23),
+            self.backTitleLabel.leadingAnchor.constraint(equalTo: self.back.leadingAnchor, constant: 22),
+            self.backTitleLabel.trailingAnchor.constraint(equalTo: self.back.trailingAnchor, constant: -22),
+            self.backHandleLabel.topAnchor.constraint(equalTo: self.backTitleLabel.bottomAnchor, constant: 25),
+            self.backHandleLabel.leadingAnchor.constraint(equalTo: self.back.leadingAnchor, constant: 22),
+            self.backHandleLabel.trailingAnchor.constraint(equalTo: self.back.trailingAnchor, constant: -22),
+            self.backIdLabel.topAnchor.constraint(equalTo: self.backHandleLabel.bottomAnchor, constant: 8),
+            self.backIdLabel.leadingAnchor.constraint(equalTo: self.back.leadingAnchor, constant: 22),
+            self.backIdLabel.trailingAnchor.constraint(equalTo: self.back.trailingAnchor, constant: -22),
+            self.backSignatureLabel.leadingAnchor.constraint(equalTo: self.back.leadingAnchor, constant: 22),
+            self.backSignatureLabel.trailingAnchor.constraint(equalTo: self.back.trailingAnchor, constant: -22),
+            self.backSignatureLabel.bottomAnchor.constraint(equalTo: self.backFooterLabel.topAnchor, constant: -17),
+            self.backFooterLabel.leadingAnchor.constraint(equalTo: self.back.leadingAnchor, constant: 22),
+            self.backFooterLabel.trailingAnchor.constraint(equalTo: self.back.trailingAnchor, constant: -22),
+            self.backFooterLabel.bottomAnchor.constraint(equalTo: self.back.bottomAnchor, constant: -19)
+        ])
+
+        let tap = UITapGestureRecognizer(target: self, action: #selector(flip))
+        self.addGestureRecognizer(tap)
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+        pan.maximumNumberOfTouches = 1
+        self.addGestureRecognizer(pan)
+        tap.require(toFail: pan)
+        self.configure(style: self.style, image: nil, displayName: self.userName, username: self.userHandle, userId: self.userId)
     }
+
     required init?(coder: NSCoder) { fatalError() }
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        self.gradient.frame = self.bounds
-        self.artworkView.frame = self.bounds
-        self.overlayView.frame = self.bounds
-        self.overlayGradient.frame = self.overlayView.bounds
-        self.faceView.frame = self.bounds
-        self.layer.shadowPath = UIBezierPath(roundedRect: self.bounds, cornerRadius: 25).cgPath
+        self.cardContainer.frame = self.bounds
+        self.front.frame = self.cardContainer.bounds
+        self.back.frame = self.cardContainer.bounds
+        self.frontGradient.frame = self.front.bounds
+        self.frontArtwork.frame = self.front.bounds
+        self.backGradient.frame = self.back.bounds
+        self.backSheen.frame = self.back.bounds
+        self.cardContainer.layer.shadowPath = UIBezierPath(roundedRect: self.cardContainer.bounds, cornerRadius: 25).cgPath
+        self.applyTransform(animated: false)
     }
 
-    func configure(card: [String: Any]) {
-        self.card = card
-        self.design = card["design"] as? [String: Any] ?? card
-        let palette = (self.design["palette"] as? [String]) ?? ["#151517", "#343238", "#C9B79E"]
-        let colors = palette.prefix(4).map { fogWalletColor($0).cgColor }
-        self.gradient.colors = colors.count >= 2 ? colors : [fogWalletColor("#171719").cgColor, fogWalletColor("#373137").cgColor]
-        self.gradient.startPoint = CGPoint(x: 0.0, y: 0.0)
-        self.gradient.endPoint = CGPoint(x: 1.0, y: 1.0)
-        self.artworkView.image = nil
-        if let art = self.design["asset_url"] as? String,
-           let url = URL(string: art), url.scheme == "https" {
-            URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
-                guard let data, let image = UIImage(data: data) else { return }
-                DispatchQueue.main.async { self?.artworkView.image = image }
-            }.resume()
+    func configure(
+        style: BiogramProfileCardStyle,
+        image: UIImage?,
+        displayName: String,
+        username: String,
+        userId: String
+    ) {
+        self.style = style
+        self.userName = displayName.isEmpty ? "BIOGRAM MEMBER" : displayName.uppercased()
+        self.userHandle = username.isEmpty ? "@BIOGRAM" : username
+        self.userId = userId
+
+        let (main, shade) = biogramCardPalette(style.paletteName)
+        self.frontGradient.colors = [main.cgColor, shade.cgColor, biogramCardColor("#101014").cgColor]
+        self.frontArtwork.image = image
+        self.frontArtwork.isHidden = image == nil
+        self.brandLabel.text = "BIOGRAM"
+        self.nameLabel.text = self.userName
+        self.handleLabel.text = self.userHandle.hasPrefix("@") ? self.userHandle : "@\(self.userHandle)"
+        self.frontSignatureLabel.text = biogramCardSignature(userId)
+        self.backHandleLabel.text = self.handleLabel.text
+        self.backIdLabel.text = "TELEGRAM ID  /  \(userId)"
+        self.backSignatureLabel.text = biogramCardSignature(userId)
+        self.backGradient.colors = [shade.cgColor, biogramCardColor("#111114").cgColor, main.withAlphaComponent(0.40).cgColor]
+
+        switch style.material {
+        case "matte":
+            self.frontSheen.colors = [UIColor.white.withAlphaComponent(0.14).cgColor, UIColor.white.withAlphaComponent(0.035).cgColor, UIColor.clear.cgColor, UIColor.white.withAlphaComponent(0.025).cgColor]
+            self.frontSheen.opacity = 0.48
+            self.backSheen.colors = [UIColor.white.withAlphaComponent(0.10).cgColor, UIColor.clear.cgColor, UIColor.white.withAlphaComponent(0.025).cgColor]
+            self.backSheen.opacity = 0.42
+        case "metallic":
+            self.frontSheen.colors = [UIColor.white.withAlphaComponent(0.45).cgColor, UIColor.white.withAlphaComponent(0.05).cgColor, UIColor.black.withAlphaComponent(0.15).cgColor, UIColor.white.withAlphaComponent(0.28).cgColor, UIColor.clear.cgColor]
+            self.frontSheen.locations = [0.0, 0.22, 0.42, 0.66, 1.0]
+            self.frontSheen.opacity = 0.8
+            self.backSheen.colors = [UIColor.white.withAlphaComponent(0.28).cgColor, UIColor.clear.cgColor, UIColor.black.withAlphaComponent(0.12).cgColor, UIColor.white.withAlphaComponent(0.18).cgColor]
+            self.backSheen.opacity = 0.72
+        default:
+            self.frontSheen.colors = [UIColor.white.withAlphaComponent(0.44).cgColor, UIColor.white.withAlphaComponent(0.08).cgColor, UIColor.clear.cgColor, UIColor.white.withAlphaComponent(0.12).cgColor]
+            self.frontSheen.locations = [0.0, 0.24, 0.56, 1.0]
+            self.frontSheen.opacity = 0.76
+            self.backSheen.colors = [UIColor.white.withAlphaComponent(0.24).cgColor, UIColor.clear.cgColor, UIColor.white.withAlphaComponent(0.08).cgColor]
+            self.backSheen.opacity = 0.64
         }
-        self.showingBack = false
-        self.renderFace()
+        self.setNeedsLayout()
     }
 
-    @objc private func toggleFace() {
+    @objc private func flip() {
         self.showingBack.toggle()
-        UIView.transition(
-            with: self.faceView,
-            duration: 0.52,
-            options: [.transitionFlipFromRight, .showHideTransitionViews, .curveEaseInOut],
-            animations: { [weak self] in self?.renderFace() }
-        )
+        self.tiltX = 0
+        self.tiltY = 0
+        self.applyTransform(animated: true)
     }
 
-    private func makeLabel(_ text: String, size: CGFloat, weight: UIFont.Weight, color: UIColor, lines: Int = 1) -> UILabel {
-        let label = UILabel()
-        label.text = text
-        label.font = UIFont.systemFont(ofSize: size, weight: weight)
-        label.textColor = color
-        label.numberOfLines = lines
-        label.adjustsFontSizeToFitWidth = true
-        label.minimumScaleFactor = 0.75
-        return label
+    @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
+        let point = gesture.translation(in: self)
+        switch gesture.state {
+        case .began:
+            self.panOrigin = CGPoint(x: self.tiltX, y: self.tiltY)
+        case .changed:
+            self.tiltY = max(-0.42, min(0.42, self.panOrigin.y + point.x / max(1.0, self.bounds.width) * 0.9))
+            self.tiltX = max(-0.24, min(0.24, self.panOrigin.x - point.y / max(1.0, self.bounds.height) * 0.55))
+            self.applyTransform(animated: false)
+        case .ended, .cancelled, .failed:
+            self.tiltX = 0
+            self.tiltY = 0
+            self.applyTransform(animated: true)
+        default:
+            break
+        }
     }
 
-    private func renderFace() {
-        self.faceView.subviews.forEach { $0.removeFromSuperview() }
-        let inset: CGFloat = 21
-        if self.showingBack {
-            let stamp = self.makeLabel("FOG  /  CERTIFICATE", size: 10, weight: .bold, color: UIColor.white.withAlphaComponent(0.72))
-            let title = self.makeLabel("Authenticity proof", size: 20, weight: .semibold, color: .white, lines: 2)
-            let proof = self.makeLabel(self.card["proof"] as? String ?? "NOT ISSUED", size: 13, weight: .semibold, color: fogWalletColor("#E6D4B7"))
-            proof.font = UIFont.monospacedSystemFont(ofSize: 13, weight: .semibold)
-            let serial = self.makeLabel("SERIAL  " + (self.card["serial"] as? String ?? "PREVIEW"), size: 10, weight: .medium, color: UIColor.white.withAlphaComponent(0.82))
-            serial.font = UIFont.monospacedSystemFont(ofSize: 10, weight: .medium)
-            let valid = (self.card["certificate_verified"] as? Bool) == true
-            let state = self.makeLabel(
-                valid ? "✓  VERIFIED CERTIFICATE" : (self.card["serial"] == nil ? "PREVIEW — NOT ISSUED" : "CERTIFICATE STATUS UNCONFIRMED"),
-                size: 10, weight: .bold,
-                color: valid ? fogWalletColor("#D9C29E") : UIColor.white.withAlphaComponent(0.64),
-                lines: 2
-            )
-            let note = self.makeLabel("This masked proof is not the activation code.", size: 10, weight: .regular, color: UIColor.white.withAlphaComponent(0.56), lines: 2)
-            [stamp, title, proof, serial, state, note].forEach { self.faceView.addSubview($0); $0.translatesAutoresizingMaskIntoConstraints = false }
-            NSLayoutConstraint.activate([
-                stamp.topAnchor.constraint(equalTo: self.faceView.topAnchor, constant: 25),
-                stamp.leadingAnchor.constraint(equalTo: self.faceView.leadingAnchor, constant: inset),
-                stamp.trailingAnchor.constraint(lessThanOrEqualTo: self.faceView.trailingAnchor, constant: -inset),
-                title.topAnchor.constraint(equalTo: stamp.bottomAnchor, constant: 34),
-                title.leadingAnchor.constraint(equalTo: self.faceView.leadingAnchor, constant: inset),
-                title.trailingAnchor.constraint(equalTo: self.faceView.trailingAnchor, constant: -inset),
-                proof.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 28),
-                proof.leadingAnchor.constraint(equalTo: self.faceView.leadingAnchor, constant: inset),
-                proof.trailingAnchor.constraint(equalTo: self.faceView.trailingAnchor, constant: -inset),
-                serial.topAnchor.constraint(equalTo: proof.bottomAnchor, constant: 23),
-                serial.leadingAnchor.constraint(equalTo: self.faceView.leadingAnchor, constant: inset),
-                serial.trailingAnchor.constraint(equalTo: self.faceView.trailingAnchor, constant: -inset),
-                state.leadingAnchor.constraint(equalTo: self.faceView.leadingAnchor, constant: inset),
-                state.trailingAnchor.constraint(equalTo: self.faceView.trailingAnchor, constant: -inset),
-                state.bottomAnchor.constraint(equalTo: note.topAnchor, constant: -14),
-                note.leadingAnchor.constraint(equalTo: self.faceView.leadingAnchor, constant: inset),
-                note.trailingAnchor.constraint(equalTo: self.faceView.trailingAnchor, constant: -inset),
-                note.bottomAnchor.constraint(equalTo: self.faceView.bottomAnchor, constant: -22)
-            ])
+    private func applyTransform(animated: Bool) {
+        var transform = CATransform3DIdentity
+        transform.m34 = -1.0 / 720.0
+        transform = CATransform3DRotate(transform, (self.showingBack ? CGFloat.pi : 0.0) + self.tiltY, 0.0, 1.0, 0.0)
+        transform = CATransform3DRotate(transform, self.tiltX, 1.0, 0.0, 0.0)
+        let changes = {
+            self.cardContainer.layer.transform = transform
+        }
+        if animated {
+            UIView.animate(withDuration: 0.48, delay: 0, usingSpringWithDamping: 0.78, initialSpringVelocity: 0.3, options: [.beginFromCurrentState, .allowUserInteraction], animations: changes)
         } else {
-            let logo = self.makeLabel("FOG", size: 12, weight: .heavy, color: UIColor.white.withAlphaComponent(0.94))
-            let topRight = self.makeLabel("PRIVATE COLLECTION", size: 8, weight: .bold, color: UIColor.white.withAlphaComponent(0.76))
-            topRight.textAlignment = .right
-            let ornament = self.makeLabel("◌", size: 56, weight: .ultraLight, color: UIColor.white.withAlphaComponent(0.17))
-            ornament.textAlignment = .right
-            let series = self.makeLabel((self.design["series"] as? String ?? "Fog Originals").uppercased(), size: 9, weight: .semibold, color: UIColor.white.withAlphaComponent(0.65))
-            let title = self.makeLabel(self.design["title"] as? String ?? "Fog Card", size: 22, weight: .semibold, color: .white, lines: 3)
-            let subtitle = self.makeLabel(self.design["subtitle"] as? String ?? "", size: 11, weight: .regular, color: UIColor.white.withAlphaComponent(0.72), lines: 2)
-            let rarity = self.makeLabel((self.design["rarity"] as? String ?? "Standard").uppercased(), size: 9, weight: .bold, color: fogWalletColor("#E7D7C0"))
-            let serial = self.makeLabel(self.card["serial"] as? String ?? "CARD PREVIEW", size: 9, weight: .medium, color: UIColor.white.withAlphaComponent(0.76))
-            serial.font = UIFont.monospacedSystemFont(ofSize: 9, weight: .medium)
-            [logo, topRight, ornament, series, title, subtitle, rarity, serial].forEach { self.faceView.addSubview($0); $0.translatesAutoresizingMaskIntoConstraints = false }
-            NSLayoutConstraint.activate([
-                logo.topAnchor.constraint(equalTo: self.faceView.topAnchor, constant: 23),
-                logo.leadingAnchor.constraint(equalTo: self.faceView.leadingAnchor, constant: inset),
-                topRight.centerYAnchor.constraint(equalTo: logo.centerYAnchor),
-                topRight.trailingAnchor.constraint(equalTo: self.faceView.trailingAnchor, constant: -inset),
-                topRight.leadingAnchor.constraint(greaterThanOrEqualTo: logo.trailingAnchor, constant: 6),
-                ornament.topAnchor.constraint(equalTo: logo.bottomAnchor, constant: 2),
-                ornament.trailingAnchor.constraint(equalTo: self.faceView.trailingAnchor, constant: -inset),
-                series.leadingAnchor.constraint(equalTo: self.faceView.leadingAnchor, constant: inset),
-                series.trailingAnchor.constraint(equalTo: self.faceView.trailingAnchor, constant: -inset),
-                series.bottomAnchor.constraint(equalTo: title.topAnchor, constant: -10),
-                title.leadingAnchor.constraint(equalTo: self.faceView.leadingAnchor, constant: inset),
-                title.trailingAnchor.constraint(equalTo: self.faceView.trailingAnchor, constant: -inset),
-                title.bottomAnchor.constraint(equalTo: subtitle.topAnchor, constant: -5),
-                subtitle.leadingAnchor.constraint(equalTo: self.faceView.leadingAnchor, constant: inset),
-                subtitle.trailingAnchor.constraint(equalTo: self.faceView.trailingAnchor, constant: -inset),
-                subtitle.bottomAnchor.constraint(equalTo: rarity.topAnchor, constant: -21),
-                rarity.leadingAnchor.constraint(equalTo: self.faceView.leadingAnchor, constant: inset),
-                rarity.bottomAnchor.constraint(equalTo: serial.topAnchor, constant: -13),
-                serial.leadingAnchor.constraint(equalTo: self.faceView.leadingAnchor, constant: inset),
-                serial.trailingAnchor.constraint(equalTo: self.faceView.trailingAnchor, constant: -inset),
-                serial.bottomAnchor.constraint(equalTo: self.faceView.bottomAnchor, constant: -22)
-            ])
+            changes()
         }
     }
 }
 
-private final class FogWalletCardsViewController: ViewController {
-    private enum Tab { case collection, catalog }
+private final class BiogramCardArtworkPickerDelegate: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+    static let shared = BiogramCardArtworkPickerDelegate()
+    var onPicked: ((UIImage?) -> Void)?
+
+    func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+        let image = (info[.originalImage] as? UIImage) ?? (info[.editedImage] as? UIImage)
+        self.onPicked?(image)
+        picker.dismiss(animated: true)
+    }
+
+    func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+        picker.dismiss(animated: true)
+    }
+}
+
+private final class BiogramProfileCardDesignerController: ViewController {
+    private let context: AccountContext
     private let accountId: String
-    private let cacheCollectionKey: String
-    private let cacheCatalogKey: String
-    private var cards: [[String: Any]] = []
-    private var designs: [[String: Any]] = []
-    private var activeTab: Tab = .collection
-    private var statusMessage: String?
-    private var isRefreshing = false
+    private let userId: String
+    private var username = "@BIOGRAM"
+    private var displayName = "BIOGRAM MEMBER"
+    private var style: BiogramProfileCardStyle
     private let scrollView = UIScrollView()
     private let contentStack = UIStackView()
+    private let cardView = Biogram3DProfileCardView()
 
-    init(accountId: String) {
+    init(context: AccountContext, accountId: String, userId: String) {
+        self.context = context
         self.accountId = accountId
-        self.cacheCollectionKey = "fog.cards.collection.\(accountId)"
-        self.cacheCatalogKey = "fog.cards.catalog.\(accountId)"
+        self.userId = userId
+        self.style = BiogramManager.shared.profileCardStyle
         super.init(navigationBarPresentationData: nil)
     }
+
     required init(coder: NSCoder) { fatalError() }
 
     override func loadDisplayNode() {
         self.displayNode = ASDisplayNode()
-        self.displayNode.backgroundColor = fogWalletColor("#0B0B0D")
+        self.displayNode.backgroundColor = biogramCardColor("#09090B")
         let root = self.displayNode.view
-        root.backgroundColor = fogWalletColor("#0B0B0D")
+        root.backgroundColor = biogramCardColor("#09090B")
+
         self.scrollView.alwaysBounceVertical = true
-        self.scrollView.keyboardDismissMode = .interactive
         self.scrollView.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(self.scrollView)
         self.contentStack.axis = .vertical
         self.contentStack.alignment = .fill
-        self.contentStack.spacing = 18
+        self.contentStack.spacing = 17
         self.contentStack.translatesAutoresizingMaskIntoConstraints = false
         self.scrollView.addSubview(self.contentStack)
         NSLayoutConstraint.activate([
@@ -1125,309 +1307,183 @@ private final class FogWalletCardsViewController: ViewController {
             self.scrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             self.scrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             self.scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            self.contentStack.topAnchor.constraint(equalTo: self.scrollView.contentLayoutGuide.topAnchor, constant: 20),
+            self.contentStack.topAnchor.constraint(equalTo: self.scrollView.contentLayoutGuide.topAnchor, constant: 18),
             self.contentStack.leadingAnchor.constraint(equalTo: self.scrollView.contentLayoutGuide.leadingAnchor, constant: 18),
             self.contentStack.trailingAnchor.constraint(equalTo: self.scrollView.contentLayoutGuide.trailingAnchor, constant: -18),
             self.contentStack.bottomAnchor.constraint(equalTo: self.scrollView.contentLayoutGuide.bottomAnchor, constant: -28),
             self.contentStack.widthAnchor.constraint(equalTo: self.scrollView.frameLayoutGuide.widthAnchor, constant: -36)
         ])
-        self.loadCache()
-        self.render()
-        self.refreshData()
-    }
 
-    private func loadCache() {
-        if let data = UserDefaults.standard.data(forKey: self.cacheCollectionKey),
-           let values = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
-            self.cards = values
-        }
-        if let data = UserDefaults.standard.data(forKey: self.cacheCatalogKey),
-           let values = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
-            self.designs = values
-        }
-    }
-
-    private func save(_ values: [[String: Any]], key: String) {
-        guard let data = try? JSONSerialization.data(withJSONObject: values, options: []) else { return }
-        UserDefaults.standard.set(data, forKey: key)
+        self.addTopBar()
+        self.addCardPreview()
+        self.addArtworkControls()
+        self.addPaletteControls()
+        self.addMaterialControls()
+        self.addFooter()
+        self.refreshCard()
+        self.loadCurrentTelegramIdentity()
     }
 
     private func label(_ text: String, size: CGFloat, weight: UIFont.Weight = .regular, color: UIColor = .white, lines: Int = 0) -> UILabel {
-        let view = UILabel()
-        view.text = text
-        view.font = UIFont.systemFont(ofSize: size, weight: weight)
-        view.textColor = color
-        view.numberOfLines = lines
-        return view
+        let label = UILabel()
+        label.text = text
+        label.font = UIFont.systemFont(ofSize: size, weight: weight)
+        label.textColor = color
+        label.numberOfLines = lines
+        label.adjustsFontSizeToFitWidth = true
+        label.minimumScaleFactor = 0.78
+        return label
     }
 
-    private func actionButton(_ title: String, primary: Bool = false, handler: @escaping () -> Void) -> UIButton {
-        let button = FogWalletActionButton(type: .system)
-        button.handler = handler
+    private func button(_ title: String, selected: Bool = false, handler: @escaping () -> Void) -> UIButton {
+        let button = UIButton(type: .system)
         button.setTitle(title, for: .normal)
-        button.backgroundColor = primary ? fogWalletColor("#D8C2A2") : fogWalletColor("#202024")
-        button.setTitleColor(primary ? fogWalletColor("#171619") : UIColor.white, for: .normal)
-        button.layer.borderColor = UIColor.white.withAlphaComponent(primary ? 0.0 : 0.12).cgColor
-        button.layer.borderWidth = primary ? 0 : 1
+        button.titleLabel?.font = UIFont.systemFont(ofSize: 13, weight: .semibold)
+        button.setTitleColor(selected ? biogramCardColor("#121214") : .white, for: .normal)
+        button.backgroundColor = selected ? biogramCardColor("#E7D7C0") : biogramCardColor("#202024")
+        button.layer.cornerRadius = 12
+        button.layer.borderWidth = selected ? 0 : 1
+        button.layer.borderColor = UIColor.white.withAlphaComponent(0.10).cgColor
+        button.contentEdgeInsets = UIEdgeInsets(top: 11, left: 12, bottom: 11, right: 12)
+        let action = UIAction { _ in handler() }
+        button.addAction(action, for: .touchUpInside)
         return button
     }
 
-    private func clearStack() {
-        while let view = self.contentStack.arrangedSubviews.last {
-            self.contentStack.removeArrangedSubview(view)
-            view.removeFromSuperview()
-        }
-    }
-
-    private func render() {
-        guard self.isViewLoaded else { return }
-        self.clearStack()
-        let topBar = UIStackView()
-        topBar.axis = .horizontal
-        topBar.alignment = .center
-        topBar.distribution = .equalSpacing
-        topBar.addArrangedSubview(self.actionButton("‹  Biogram") { [weak self] in self?.dismiss(animated: true) })
-        topBar.addArrangedSubview(self.actionButton("Refresh") { [weak self] in self?.refreshData() })
-        self.contentStack.addArrangedSubview(topBar)
-        let title = self.label("FOG WALLET", size: 11, weight: .bold, color: fogWalletColor("#D8C2A2"))
-        self.contentStack.addArrangedSubview(title)
-        let subtitle = self.label("A private collection. Not a trading game.", size: 25, weight: .semibold, color: .white, lines: 2)
-        subtitle.adjustsFontSizeToFitWidth = true
-        subtitle.minimumScaleFactor = 0.82
-        self.contentStack.addArrangedSubview(subtitle)
-        self.contentStack.addArrangedSubview(self.label("Tap any card to turn it over and view its masked authenticity proof. Activation codes are never shown on a card.", size: 13, color: UIColor.white.withAlphaComponent(0.58), lines: 0))
-        if let message = self.statusMessage {
-            let status = self.label(message, size: 12, color: fogWalletColor("#D9C6A9"), lines: 0)
-            status.backgroundColor = fogWalletColor("#1B1918")
-            status.layer.cornerRadius = 12
-            status.layer.masksToBounds = true
-            self.contentStack.addArrangedSubview(status)
-        }
-        let tabs = UIStackView()
-        tabs.axis = .horizontal
-        tabs.distribution = .fillEqually
-        tabs.spacing = 8
-        tabs.addArrangedSubview(self.actionButton(self.cards.isEmpty ? "My cards" : "My cards · \(self.cards.count)", primary: self.activeTab == .collection) { [weak self] in
-            self?.activeTab = .collection
-            self?.render()
-        })
-        tabs.addArrangedSubview(self.actionButton("Discover", primary: self.activeTab == .catalog) { [weak self] in
-            self?.activeTab = .catalog
-            self?.render()
-        })
-        self.contentStack.addArrangedSubview(tabs)
-        self.contentStack.addArrangedSubview(self.actionButton("Activate a code", handler: { [weak self] in self?.promptForActivationCode() }))
-        if self.activeTab == .collection {
-            if self.cards.isEmpty {
-                self.contentStack.addArrangedSubview(self.label("Your collection is empty", size: 19, weight: .semibold, color: .white))
-                self.contentStack.addArrangedSubview(self.label("You can collect a standard design without a code, or activate a limited-edition card with a code.", size: 13, color: UIColor.white.withAlphaComponent(0.58), lines: 0))
-                self.contentStack.addArrangedSubview(self.actionButton("Explore card designs", primary: true) { [weak self] in
-                    self?.activeTab = .catalog
-                    self?.render()
-                })
-            } else {
-                for card in self.cards { self.addCollectionCard(card) }
-            }
-        } else {
-            if self.designs.isEmpty {
-                self.contentStack.addArrangedSubview(self.label("No card designs are published yet.", size: 16, weight: .semibold, color: .white))
-                self.contentStack.addArrangedSubview(self.label("The collection will refresh when designs become available on the Fog Wallet server.", size: 13, color: UIColor.white.withAlphaComponent(0.58), lines: 0))
-            } else {
-                for design in self.designs { self.addCatalogDesign(design) }
-            }
-        }
-        self.contentStack.addArrangedSubview(self.label("Artwork, collection and proof status refresh from Fog Wallet. Your last successful collection/catalog are cached on this device.", size: 11, color: UIColor.white.withAlphaComponent(0.40), lines: 0))
-    }
-
-    private func addCollectionCard(_ card: [String: Any]) {
-        let cardView = FogPremiumCardView()
-        cardView.configure(card: card)
-        cardView.translatesAutoresizingMaskIntoConstraints = false
-        let centering = UIView()
-        centering.addSubview(cardView)
-        NSLayoutConstraint.activate([
-            cardView.centerXAnchor.constraint(equalTo: centering.centerXAnchor),
-            cardView.topAnchor.constraint(equalTo: centering.topAnchor),
-            cardView.bottomAnchor.constraint(equalTo: centering.bottomAnchor),
-            cardView.widthAnchor.constraint(equalToConstant: 222),
-            cardView.heightAnchor.constraint(equalToConstant: 332)
-        ])
-        let cardIndex = self.cards.firstIndex { ($0["id"] as? String) == (card["id"] as? String) } ?? 0
-        centering.alpha = 0
-        centering.transform = CGAffineTransform(scaleX: 0.94, y: 0.94).translatedBy(x: 0, y: 10)
-        self.contentStack.addArrangedSubview(centering)
-        UIView.animate(
-            withDuration: 0.62,
-            delay: Double(min(cardIndex, 6)) * 0.055,
-            usingSpringWithDamping: 0.84,
-            initialSpringVelocity: 0.35,
-            options: [.beginFromCurrentState, .allowUserInteraction],
-            animations: {
-                centering.alpha = 1
-                centering.transform = .identity
-            }
-        )
-        let issued = (card["issued_at"] as? NSNumber)?.doubleValue ?? 0
-        let date = DateFormatter()
-        date.dateStyle = .medium
-        date.timeStyle = .none
-        let dateText = issued > 0 ? date.string(from: Date(timeIntervalSince1970: issued)) : "Date unavailable"
-        let design = card["design"] as? [String: Any] ?? [:]
-        self.contentStack.addArrangedSubview(self.label("\(design["title"] as? String ?? "Fog Card")  ·  \(dateText)", size: 12, color: UIColor.white.withAlphaComponent(0.62), lines: 2))
-    }
-
-    private func addCatalogDesign(_ design: [String: Any]) {
+    private func addTopBar() {
         let row = UIStackView()
         row.axis = .horizontal
         row.alignment = .center
-        row.spacing = 14
-        let preview = FogPremiumCardView()
-        preview.configure(card: design)
-        preview.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            preview.widthAnchor.constraint(equalToConstant: 145),
-            preview.heightAnchor.constraint(equalToConstant: 218)
-        ])
-        row.addArrangedSubview(preview)
-        let details = UIStackView()
-        details.axis = .vertical
-        details.alignment = .fill
-        details.spacing = 8
-        details.addArrangedSubview(self.label(design["title"] as? String ?? "Fog Card", size: 16, weight: .semibold, color: .white, lines: 3))
-        details.addArrangedSubview(self.label("\(design["rarity"] as? String ?? "Standard")  ·  \(design["series"] as? String ?? "Fog Originals")", size: 11, color: fogWalletColor("#D8C2A2"), lines: 2))
-        details.addArrangedSubview(self.label(design["subtitle"] as? String ?? "", size: 12, color: UIColor.white.withAlphaComponent(0.56), lines: 3))
-        if (design["kind"] as? String ?? "standard") == "standard" {
-            details.addArrangedSubview(self.actionButton("Collect", primary: true) { [weak self] in
-                self?.claim(designId: design["id"] as? String ?? "")
-            })
-        } else {
-            details.addArrangedSubview(self.actionButton("Activation code") { [weak self] in self?.promptForActivationCode() })
-            if let remaining = design["remaining"] as? NSNumber {
-                details.addArrangedSubview(self.label("\(remaining.intValue) left in run", size: 10, color: UIColor.white.withAlphaComponent(0.52)))
-            }
-        }
-        row.addArrangedSubview(details)
-        let designIndex = self.designs.firstIndex { ($0["id"] as? String) == (design["id"] as? String) } ?? 0
-        row.alpha = 0
-        row.transform = CGAffineTransform(scaleX: 0.97, y: 0.97).translatedBy(x: 0, y: 7)
+        row.distribution = .equalSpacing
+        row.addArrangedSubview(self.button("‹  Biogram") { [weak self] in self?.dismiss(animated: true) })
+        row.addArrangedSubview(self.label("CARD STUDIO", size: 10, weight: .bold, color: biogramCardColor("#E7D7C0")))
         self.contentStack.addArrangedSubview(row)
-        UIView.animate(
-            withDuration: 0.52,
-            delay: Double(min(designIndex, 6)) * 0.04,
-            usingSpringWithDamping: 0.88,
-            initialSpringVelocity: 0.25,
-            options: [.beginFromCurrentState, .allowUserInteraction],
-            animations: {
-                row.alpha = 1
-                row.transform = .identity
-            }
-        )
-        let separator = UIView()
-        separator.backgroundColor = UIColor.white.withAlphaComponent(0.07)
-        separator.heightAnchor.constraint(equalToConstant: 1).isActive = true
-        self.contentStack.addArrangedSubview(separator)
+        self.contentStack.addArrangedSubview(self.label("Your profile. Your signature.", size: 25, weight: .semibold, color: .white, lines: 2))
+        self.contentStack.addArrangedSubview(self.label("A two-sided profile card with real perspective, touch tilt and separate front/back layers.", size: 13, color: UIColor.white.withAlphaComponent(0.57), lines: 0))
     }
 
-    private func refreshData() {
-        guard !self.isRefreshing else { return }
-        self.isRefreshing = true
-        self.statusMessage = "Refreshing Fog Wallet…"
-        self.render()
-        let group = DispatchGroup()
-        var hadFailure = false
-        group.enter()
-        FogWalletConnectionManager.shared.cardRequest(
-            path: "/v1/cards/catalog", method: "GET", body: nil,
-            accountId: self.accountId, requiresAuth: false
-        ) { [weak self] result in
-            guard let self else { group.leave(); return }
-            if case let .success(payload) = result, let designs = payload["designs"] as? [[String: Any]] {
-                self.designs = designs
-                self.save(designs, key: self.cacheCatalogKey)
-            } else {
-                hadFailure = true
-            }
-            group.leave()
-        }
-        group.enter()
-        FogWalletConnectionManager.shared.cardRequest(
-            path: "/v1/cards/collection", method: "GET", body: nil,
-            accountId: self.accountId, requiresAuth: true
-        ) { [weak self] result in
-            guard let self else { group.leave(); return }
-            if case let .success(payload) = result, let cards = payload["cards"] as? [[String: Any]] {
-                self.cards = cards
-                self.save(cards, key: self.cacheCollectionKey)
-            } else {
-                hadFailure = true
-            }
-            group.leave()
-        }
-        group.notify(queue: .main) { [weak self] in
+    private func addCardPreview() {
+        self.cardView.translatesAutoresizingMaskIntoConstraints = false
+        self.contentStack.addArrangedSubview(self.cardView)
+        self.cardView.heightAnchor.constraint(equalTo: self.cardView.widthAnchor, multiplier: 0.63).isActive = true
+        self.contentStack.addArrangedSubview(self.label("TAP TO FLIP  ·  DRAG TO TILT", size: 9, weight: .semibold, color: UIColor.white.withAlphaComponent(0.48)))
+    }
+
+    private func addArtworkControls() {
+        self.contentStack.addArrangedSubview(self.label("FRONT ARTWORK", size: 10, weight: .bold, color: biogramCardColor("#E7D7C0")))
+        let row = UIStackView()
+        row.axis = .horizontal
+        row.distribution = .fillEqually
+        row.spacing = 8
+        row.addArrangedSubview(self.button("Choose image") { [weak self] in self?.chooseArtwork() })
+        row.addArrangedSubview(self.button("Use color only") { [weak self] in
             guard let self else { return }
-            self.isRefreshing = false
-            self.statusMessage = hadFailure ? "Some data could not refresh. Showing the last saved data where available." : nil
-            self.render()
-        }
-    }
-
-    private func claim(designId: String) {
-        guard !designId.isEmpty else { return }
-        FogWalletConnectionManager.shared.cardRequest(
-            path: "/v1/cards/claim", method: "POST",
-            body: ["design_id": designId], accountId: self.accountId
-        ) { [weak self] result in
-            guard let self else { return }
-            switch result {
-            case .success:
-                self.activeTab = .collection
-                let alert = UIAlertController(title: "Card added", message: "Fog Wallet has refreshed your collection.", preferredStyle: .alert)
-                alert.addAction(UIAlertAction(title: "Continue", style: .default) { [weak self] _ in self?.refreshData() })
-                self.present(alert, animated: true)
-            case let .failure(error):
-                self.showMessage(title: "Could not collect card", message: error.localizedDescription)
+            BiogramManager.shared.setProfileCardImage(nil) { [weak self] in
+                guard let self else { return }
+                self.refreshCard()
             }
-        }
-    }
-
-    private func promptForActivationCode() {
-        let alert = UIAlertController(title: "Activate a card", message: "Enter the activation code. The code will not be displayed on the card.", preferredStyle: .alert)
-        alert.addTextField { field in
-            field.placeholder = "FOG-XXXX-XXXX-XXXX"
-            field.autocapitalizationType = .allCharacters
-            field.autocorrectionType = .no
-            field.clearButtonMode = .whileEditing
-        }
-        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
-        alert.addAction(UIAlertAction(title: "Activate", style: .default) { [weak self, weak alert] _ in
-            let code = alert?.textFields?.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            guard !code.isEmpty else { return }
-            self?.activate(code: code)
         })
-        self.present(alert, animated: true)
+        self.contentStack.addArrangedSubview(row)
     }
 
-    private func activate(code: String) {
-        FogWalletConnectionManager.shared.cardRequest(
-            path: "/v1/cards/activate", method: "POST",
-            body: ["code": code], accountId: self.accountId
-        ) { [weak self] result in
-            guard let self else { return }
-            switch result {
-            case .success:
-                self.activeTab = .collection
-                let alert = UIAlertController(title: "Card activated", message: "The card is now in your Fog Wallet collection.", preferredStyle: .alert)
-                alert.addAction(UIAlertAction(title: "Show collection", style: .default) { [weak self] _ in self?.refreshData() })
-                self.present(alert, animated: true)
-            case let .failure(error):
-                self.showMessage(title: "Activation failed", message: error.localizedDescription)
+    private func addPaletteControls() {
+        self.contentStack.addArrangedSubview(self.label("COLOR MATERIAL", size: 10, weight: .bold, color: biogramCardColor("#E7D7C0")))
+        let paletteNames = BiogramProfileColor.presets.map { $0.0 }
+        for start in stride(from: 0, to: paletteNames.count, by: 2) {
+            let row = UIStackView()
+            row.axis = .horizontal
+            row.distribution = .fillEqually
+            row.spacing = 8
+            for name in paletteNames[start..<min(start + 2, paletteNames.count)] {
+                let (main, _) = biogramCardPalette(name)
+                let selected = self.style.paletteName == name
+                let choice = self.button("●   \(name)", selected: selected) { [weak self] in
+                    guard let self else { return }
+                    self.style.paletteName = name
+                    self.saveStyle()
+                }
+                choice.setTitleColor(selected ? biogramCardColor("#111114") : main, for: .normal)
+                row.addArrangedSubview(choice)
             }
+            if row.arrangedSubviews.count == 1 {
+                row.addArrangedSubview(UIView())
+            }
+            self.contentStack.addArrangedSubview(row)
         }
     }
 
-    private func showMessage(title: String, message: String) {
-        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "OK", style: .default))
-        self.present(alert, animated: true)
+    private func addMaterialControls() {
+        self.contentStack.addArrangedSubview(self.label("SURFACE FINISH", size: 10, weight: .bold, color: biogramCardColor("#E7D7C0")))
+        let row = UIStackView()
+        row.axis = .horizontal
+        row.distribution = .fillEqually
+        row.spacing = 8
+        for (title, value) in BiogramProfileCardStyle.materials {
+            row.addArrangedSubview(self.button(title, selected: self.style.material == value) { [weak self] in
+                guard let self else { return }
+                self.style.material = value
+                self.saveStyle()
+            })
+        }
+        self.contentStack.addArrangedSubview(row)
+    }
+
+    private func addFooter() {
+        self.contentStack.addArrangedSubview(self.label("The ID and profile signature are decorative identity details, not a payment credential. Your chosen artwork and material are saved locally on this device.", size: 11, color: UIColor.white.withAlphaComponent(0.43), lines: 0))
+    }
+
+    private func chooseArtwork() {
+        guard UIImagePickerController.isSourceTypeAvailable(.photoLibrary) else { return }
+        let picker = UIImagePickerController()
+        picker.sourceType = .photoLibrary
+        picker.allowsEditing = false
+        picker.delegate = BiogramCardArtworkPickerDelegate.shared
+        BiogramCardArtworkPickerDelegate.shared.onPicked = { [weak self] image in
+            guard let self, let image else { return }
+            BiogramManager.shared.setProfileCardImage(image) { [weak self] in
+                guard let self else { return }
+                self.refreshCard()
+            }
+        }
+        self.present(PickerWrapper(picker: picker), in: .window(.root), with: nil)
+    }
+
+    private func saveStyle() {
+        BiogramManager.shared.setProfileCardStyle(self.style) { [weak self] in
+            guard let self else { return }
+            self.refreshCard()
+        }
+    }
+
+    private func refreshCard() {
+        self.style = BiogramManager.shared.profileCardStyle
+        self.cardView.configure(
+            style: self.style,
+            image: BiogramManager.shared.profileCardImage(),
+            displayName: self.displayName,
+            username: self.username,
+            userId: self.userId
+        )
+        self.view.setNeedsLayout()
+    }
+
+    private func loadCurrentTelegramIdentity() {
+        let signal = self.context.engine.data.subscribe(
+            TelegramEngine.EngineData.Item.Peer.Peer(id: self.context.account.peerId)
+        )
+        |> take(1)
+        |> deliverOnMainQueue
+        let _ = signal.start(next: { [weak self] peer in
+            guard let self, let peer else { return }
+            self.displayName = peer.compactDisplayTitle
+            if let username = peer.username, !username.isEmpty {
+                self.username = "@\(username)"
+            } else if let username = peer.usernames.first(where: { $0.flags.contains(.isActive) })?.username {
+                self.username = "@\(username)"
+            } else {
+                self.username = "@biogram"
+            }
+            self.refreshCard()
+        })
     }
 }
