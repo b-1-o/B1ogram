@@ -1078,7 +1078,7 @@ private final class FogWalletCardsViewController: ViewController {
         self.cacheCatalogKey = "fog.cards.catalog.\(accountId)"
         super.init(navigationBarPresentationData: nil)
     }
-    required init?(coder: NSCoder) { fatalError() }
+    required init(coder: NSCoder) { fatalError() }
 
     override func loadDisplayNode() {
         self.displayNode = ASDisplayNode()
