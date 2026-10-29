@@ -6,16 +6,5 @@
   "workers_dev": true,
   "observability": {
     "enabled": false
-  },
-  "vars": {
-    "TELEGRAM_CLIENT_ID": "9254075951"
-  },
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "fog-wallet-db",
-      "database_id": "87080a92-8b59-4699-a62f-1719244c2590",
-      "migrations_dir": "migrations"
-    }
-  ]
+  }
 }
