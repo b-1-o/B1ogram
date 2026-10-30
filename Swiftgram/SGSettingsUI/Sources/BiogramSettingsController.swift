@@ -574,7 +574,13 @@ public func biogramSettingsController(context: AccountContext) -> ViewController
             presentControllerImpl?(controller, nil)
         },
         editOrRemoveNumber: { number in
-            let alert = BiogramActionsAlertController(title: number.number, message: "Edit or remove this number", actions: [
+            let visibilityTitle = number.isPublic == true ? "Hide from other Biogram profiles" : "Show on public Biogram profiles"
+            let alert = BiogramActionsAlertController(title: number.number, message: "Edit, publish or remove this number", actions: [
+                (title: visibilityTitle, destructive: false, action: {
+                    BiogramManager.shared.setVirtualNumberPublic(id: number.id, isPublic: number.isPublic != true) {
+                        Queue.mainQueue().async { updateState() }
+                    }
+                }),
                 (title: "Edit", destructive: false, action: {
                     let presentationData = context.sharedContext.currentPresentationData.with { $0 }
                     let editCtrl = biogramPrompt(
@@ -843,9 +849,12 @@ private final class Biogram3DProfileCardView: UIView {
     private let back = UIView()
     private let frontGradient = CAGradientLayer()
     private let frontArtwork = UIImageView()
+    private let frontFrost = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
     private let frontSheen = CAGradientLayer()
     private let backGradient = CAGradientLayer()
+    private let backFrost = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
     private let backSheen = CAGradientLayer()
+    private let backCipherLabel = UILabel()
     private let brandLabel = UILabel()
     private let editionLabel = UILabel()
     private let chipView = UIView()
@@ -895,6 +904,10 @@ private final class Biogram3DProfileCardView: UIView {
         self.frontArtwork.clipsToBounds = true
         self.frontArtwork.isUserInteractionEnabled = false
         self.front.addSubview(self.frontArtwork)
+
+        self.frontFrost.isUserInteractionEnabled = false
+        self.frontFrost.alpha = 0.46
+        self.front.addSubview(self.frontFrost)
 
         self.frontSheen.startPoint = CGPoint(x: 0.0, y: 0.0)
         self.frontSheen.endPoint = CGPoint(x: 1.0, y: 1.0)
@@ -958,6 +971,9 @@ private final class Biogram3DProfileCardView: UIView {
         self.backGradient.startPoint = CGPoint(x: 0, y: 0)
         self.backGradient.endPoint = CGPoint(x: 1, y: 1)
         self.back.layer.insertSublayer(self.backGradient, at: 0)
+        self.backFrost.isUserInteractionEnabled = false
+        self.backFrost.alpha = 0.40
+        self.back.addSubview(self.backFrost)
         self.backSheen.startPoint = CGPoint(x: 0.0, y: 0.2)
         self.backSheen.endPoint = CGPoint(x: 1.0, y: 0.8)
         self.back.layer.addSublayer(self.backSheen)
@@ -973,9 +989,15 @@ private final class Biogram3DProfileCardView: UIView {
         self.backHandleLabel.minimumScaleFactor = 0.75
         self.back.addSubview(self.backHandleLabel)
 
-        self.backIdLabel.font = UIFont.monospacedSystemFont(ofSize: 11, weight: .medium)
+        self.backIdLabel.font = UIFont.monospacedSystemFont(ofSize: 10, weight: .medium)
         self.backIdLabel.textColor = UIColor.white.withAlphaComponent(0.78)
         self.back.addSubview(self.backIdLabel)
+
+        self.backCipherLabel.font = UIFont.monospacedSystemFont(ofSize: 8.5, weight: .medium)
+        self.backCipherLabel.textColor = UIColor.white.withAlphaComponent(0.55)
+        self.backCipherLabel.adjustsFontSizeToFitWidth = true
+        self.backCipherLabel.minimumScaleFactor = 0.7
+        self.back.addSubview(self.backCipherLabel)
 
         self.backSignatureLabel.font = UIFont.monospacedSystemFont(ofSize: 12, weight: .semibold)
         self.backSignatureLabel.textColor = biogramCardColor("#E8D9C4")
@@ -991,7 +1013,7 @@ private final class Biogram3DProfileCardView: UIView {
         for view in [
             self.brandLabel, self.editionLabel, self.chipView, self.nameLabel,
             self.handleLabel, self.frontSignatureLabel, self.backTitleLabel,
-            self.backHandleLabel, self.backIdLabel, self.backSignatureLabel, self.backFooterLabel
+            self.backHandleLabel, self.backIdLabel, self.backCipherLabel, self.backSignatureLabel, self.backFooterLabel
         ] {
             view.translatesAutoresizingMaskIntoConstraints = false
         }
@@ -1027,6 +1049,9 @@ private final class Biogram3DProfileCardView: UIView {
             self.backIdLabel.topAnchor.constraint(equalTo: self.backHandleLabel.bottomAnchor, constant: 8),
             self.backIdLabel.leadingAnchor.constraint(equalTo: self.back.leadingAnchor, constant: 22),
             self.backIdLabel.trailingAnchor.constraint(equalTo: self.back.trailingAnchor, constant: -22),
+            self.backCipherLabel.topAnchor.constraint(equalTo: self.backIdLabel.bottomAnchor, constant: 14),
+            self.backCipherLabel.leadingAnchor.constraint(equalTo: self.back.leadingAnchor, constant: 22),
+            self.backCipherLabel.trailingAnchor.constraint(equalTo: self.back.trailingAnchor, constant: -22),
             self.backSignatureLabel.leadingAnchor.constraint(equalTo: self.back.leadingAnchor, constant: 22),
             self.backSignatureLabel.trailingAnchor.constraint(equalTo: self.back.trailingAnchor, constant: -22),
             self.backSignatureLabel.bottomAnchor.constraint(equalTo: self.backFooterLabel.topAnchor, constant: -17),
@@ -1053,8 +1078,10 @@ private final class Biogram3DProfileCardView: UIView {
         self.back.frame = self.cardContainer.bounds
         self.frontGradient.frame = self.front.bounds
         self.frontArtwork.frame = self.front.bounds
+        self.frontFrost.frame = self.front.bounds
         self.frontSheen.frame = self.front.bounds
         self.backGradient.frame = self.back.bounds
+        self.backFrost.frame = self.back.bounds
         self.backSheen.frame = self.back.bounds
         self.cardContainer.layer.shadowPath = UIBezierPath(roundedRect: self.cardContainer.bounds, cornerRadius: 25).cgPath
         self.applyTransform(animated: false)
@@ -1087,17 +1114,23 @@ private final class Biogram3DProfileCardView: UIView {
 
         switch style.material {
         case "matte":
+            self.frontFrost.alpha = 0.66
+            self.backFrost.alpha = 0.62
             self.frontSheen.colors = [UIColor.white.withAlphaComponent(0.14).cgColor, UIColor.white.withAlphaComponent(0.035).cgColor, UIColor.clear.cgColor, UIColor.white.withAlphaComponent(0.025).cgColor]
             self.frontSheen.opacity = 0.48
             self.backSheen.colors = [UIColor.white.withAlphaComponent(0.10).cgColor, UIColor.clear.cgColor, UIColor.white.withAlphaComponent(0.025).cgColor]
             self.backSheen.opacity = 0.42
         case "metallic":
+            self.frontFrost.alpha = 0.24
+            self.backFrost.alpha = 0.20
             self.frontSheen.colors = [UIColor.white.withAlphaComponent(0.45).cgColor, UIColor.white.withAlphaComponent(0.05).cgColor, UIColor.black.withAlphaComponent(0.15).cgColor, UIColor.white.withAlphaComponent(0.28).cgColor, UIColor.clear.cgColor]
             self.frontSheen.locations = [0.0, 0.22, 0.42, 0.66, 1.0]
             self.frontSheen.opacity = 0.8
             self.backSheen.colors = [UIColor.white.withAlphaComponent(0.28).cgColor, UIColor.clear.cgColor, UIColor.black.withAlphaComponent(0.12).cgColor, UIColor.white.withAlphaComponent(0.18).cgColor]
             self.backSheen.opacity = 0.72
         default:
+            self.frontFrost.alpha = 0.44
+            self.backFrost.alpha = 0.40
             self.frontSheen.colors = [UIColor.white.withAlphaComponent(0.44).cgColor, UIColor.white.withAlphaComponent(0.08).cgColor, UIColor.clear.cgColor, UIColor.white.withAlphaComponent(0.12).cgColor]
             self.frontSheen.locations = [0.0, 0.24, 0.56, 1.0]
             self.frontSheen.opacity = 0.76
@@ -1394,4 +1427,120 @@ private final class BiogramProfileCardDesignerController: ViewController {
             self.refreshCard()
         })
     }
+}
+
+
+private final class BiogramProfileCardViewerController: ViewController {
+    private let profile: BiogramCloudPublicProfile
+    private let cardView = Biogram3DProfileCardView()
+
+    init(profile: BiogramCloudPublicProfile) {
+        self.profile = profile
+        super.init(navigationBarPresentationData: nil)
+    }
+
+    required init(coder: NSCoder) { fatalError() }
+
+    override func loadDisplayNode() {
+        self.displayNode = ASDisplayNode()
+        self.displayNode.backgroundColor = biogramCardColor("#08090B")
+
+        let root = self.displayNode.view
+        root.backgroundColor = biogramCardColor("#08090B")
+
+        let backgroundBlur = UIVisualEffectView(effect: UIBlurEffect(style: .systemUltraThinMaterialDark))
+        backgroundBlur.alpha = 0.48
+        backgroundBlur.isUserInteractionEnabled = false
+        backgroundBlur.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(backgroundBlur)
+
+        let stack = UIStackView()
+        stack.axis = .vertical
+        stack.alignment = .fill
+        stack.spacing = 18
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(stack)
+
+        let top = UIStackView()
+        top.axis = .horizontal
+        top.alignment = .center
+        top.distribution = .equalSpacing
+
+        let closeButton = UIButton(type: .system)
+        closeButton.setTitle("‹  Biogram", for: .normal)
+        closeButton.titleLabel?.font = UIFont.systemFont(ofSize: 15, weight: .semibold)
+        closeButton.setTitleColor(UIColor.white.withAlphaComponent(0.88), for: .normal)
+        closeButton.contentEdgeInsets = UIEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
+        closeButton.backgroundColor = UIColor.white.withAlphaComponent(0.075)
+        closeButton.layer.cornerRadius = 13
+        closeButton.layer.borderWidth = 1
+        closeButton.layer.borderColor = UIColor.white.withAlphaComponent(0.12).cgColor
+        closeButton.addTarget(self, action: #selector(closeViewer), for: .touchUpInside)
+
+        let title = UILabel()
+        title.text = "BIOGRAM CARD"
+        title.font = UIFont.monospacedSystemFont(ofSize: 10, weight: .bold)
+        title.textColor = biogramCardColor("#E6D7C5")
+
+        top.addArrangedSubview(closeButton)
+        top.addArrangedSubview(title)
+        stack.addArrangedSubview(top)
+
+        let heading = UILabel()
+        heading.text = "A personal profile signature."
+        heading.font = UIFont.systemFont(ofSize: 25, weight: .semibold)
+        heading.textColor = .white
+        heading.numberOfLines = 2
+        stack.addArrangedSubview(heading)
+
+        let subtitle = UILabel()
+        subtitle.text = "Tap to flip the card. Drag to inspect its glass surface and perspective."
+        subtitle.font = UIFont.systemFont(ofSize: 13, weight: .regular)
+        subtitle.textColor = UIColor.white.withAlphaComponent(0.58)
+        subtitle.numberOfLines = 0
+        stack.addArrangedSubview(subtitle)
+
+        self.cardView.translatesAutoresizingMaskIntoConstraints = false
+        stack.addArrangedSubview(self.cardView)
+        self.cardView.heightAnchor.constraint(equalTo: self.cardView.widthAnchor, multiplier: 0.63).isActive = true
+
+        let hint = UILabel()
+        hint.text = "FRONT / BACK  ·  PERSONAL IDENTIFIER  ·  BIOGRAM"
+        hint.font = UIFont.monospacedSystemFont(ofSize: 8, weight: .medium)
+        hint.textColor = UIColor.white.withAlphaComponent(0.42)
+        hint.numberOfLines = 0
+        hint.textAlignment = .center
+        stack.addArrangedSubview(hint)
+
+        NSLayoutConstraint.activate([
+            backgroundBlur.topAnchor.constraint(equalTo: root.topAnchor),
+            backgroundBlur.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            backgroundBlur.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            backgroundBlur.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            stack.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor, constant: 20),
+            stack.leadingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.leadingAnchor, constant: 20),
+            stack.trailingAnchor.constraint(equalTo: root.safeAreaLayoutGuide.trailingAnchor, constant: -20),
+            stack.centerYAnchor.constraint(lessThanOrEqualTo: root.safeAreaLayoutGuide.centerYAnchor),
+            self.cardView.widthAnchor.constraint(lessThanOrEqualToConstant: 560)
+        ])
+
+        self.cardView.configure(
+            style: self.profile.cardStyle,
+            image: self.profile.cardImage,
+            displayName: self.profile.displayName,
+            username: self.profile.username.map { "@\($0)" } ?? "@biogram",
+            userId: self.profile.telegramId
+        )
+    }
+
+    @objc private func closeViewer() {
+        self.dismiss(animated: true)
+    }
+}
+
+public func biogramProfileCardViewerController(
+    context: AccountContext,
+    profile: BiogramCloudPublicProfile
+) -> ViewController {
+    return BiogramProfileCardViewerController(profile: profile)
 }

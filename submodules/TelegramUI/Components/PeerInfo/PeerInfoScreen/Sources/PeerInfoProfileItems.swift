@@ -93,6 +93,14 @@ func infoItems(
     }
     
     if case let .user(user) = data.peer {
+        let biogramTelegramId = String(user.id.id._internalGetInt64Value())
+        if !isMyProfile {
+            BiogramCloudService.shared.loadPublicProfile(for: biogramTelegramId) { _ in
+                interaction.requestLayout(animated: true)
+            }
+        }
+        let cachedBiogramProfile = BiogramCloudService.shared.cachedPublicProfile(for: biogramTelegramId)
+
         let ItemCallList = 1000
         let ItemPersonalChannelHeader = 2000
         let ItemPersonalChannel = 2001
@@ -157,6 +165,42 @@ func infoItems(
             }))
         }
         
+        // Biogram Card is a dedicated profile action below the activity header, never a banner.
+        if isMyProfile || cachedBiogramProfile != nil {
+            items[currentPeerInfoSection]!.append(
+                PeerInfoScreenDisclosureItem(
+                    id: 9480,
+                    label: .coloredText("BIOGRAM", .accent),
+                    text: "Biogram Card",
+                    action: {
+                        let profile: BiogramCloudPublicProfile
+                        if isMyProfile {
+                            let payload = BiogramManager.shared.cloudProfilePayload()
+                            let cardImage = BiogramManager.shared.profileCardImage()?.jpegData(compressionQuality: 0.84)?.base64EncodedString()
+                            profile = BiogramCloudPublicProfile(
+                                telegramId: biogramTelegramId,
+                                username: user.addressName,
+                                displayName: EnginePeer(user).compactDisplayTitle,
+                                profileColorEnabled: payload.profileColorEnabled,
+                                profileColor: payload.profileColor,
+                                cardStyle: payload.cardStyle,
+                                aliases: payload.aliases,
+                                publicNumbers: payload.publicNumbers,
+                                cardImageBase64: cardImage,
+                                publicEnabled: true
+                            )
+                        } else if let cachedBiogramProfile {
+                            profile = cachedBiogramProfile
+                        } else {
+                            return
+                        }
+                        guard let controller = interaction.getController() else { return }
+                        controller.push(biogramProfileCardViewerController(context: context, profile: profile))
+                    }
+                )
+            )
+        }
+
         if let linkedCommunityData = data.linkedCommunityData {
             items[.community]!.append(PeerInfoScreenCommunityItem(
                 id: ItemCommunity,
@@ -173,7 +217,7 @@ func infoItems(
             ))
         }
         
-        // === Biogram: локальные виртуальные номера ===
+        // Own numbers remain visible to the owner. Other users only see numbers explicitly published in Biogram settings.
         if isMyProfile {
             let localNumbers = BiogramManager.shared.virtualNumbers()
             for (index, localNumber) in localNumbers.enumerated() {
@@ -186,6 +230,21 @@ func infoItems(
                         action: { _, _ in },
                         longTapAction: nil,
                         contextAction: nil,
+                        requestLayout: { animated in
+                            interaction.requestLayout(animated)
+                        }
+                    )
+                )
+            }
+        } else if let cachedBiogramProfile {
+            for (index, number) in cachedBiogramProfile.publicNumbers.enumerated() {
+                items[currentPeerInfoSection]!.append(
+                    PeerInfoScreenLabeledValueItem(
+                        id: ItemPhoneNumber + 200 + index,
+                        label: number.label ?? "Biogram number",
+                        text: number.number,
+                        textColor: .accent,
+                        action: { _, _ in },
                         requestLayout: { animated in
                             interaction.requestLayout(animated)
                         }
@@ -272,17 +331,6 @@ func infoItems(
             }
         }
         
-// === Biogram: Banner ===
-if isMyProfile {
-    if let bannerImage = BiogramManager.shared.bannerImage() {
-        items[currentPeerInfoSection]!.append(
-            PeerInfoScreenBiogramBannerItem(
-                id: 9498,
-                image: bannerImage
-            )
-        )
-    }
-}
 // === Biogram: локальные collectibles (сетка) — оставляем, просто не включай ===
 if isMyProfile {
     let collectibles = BiogramManager.shared.collectibles()
