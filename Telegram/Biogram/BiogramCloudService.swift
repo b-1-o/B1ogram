@@ -382,7 +382,7 @@ public final class BiogramCloudService {
         self.lock.lock()
         let cached = self.publicProfiles[telegramId]
         let fetchedAt = self.publicProfileFetchedAt[telegramId]
-        let cacheIsFresh = cached != nil && fetchedAt.map { Date().timeIntervalSince($0) < 60 } == true
+        let cacheIsFresh = fetchedAt.map { Date().timeIntervalSince($0) < 60 } == true
         if cacheIsFresh {
             self.lock.unlock()
             DispatchQueue.main.async { completion(cached) }
@@ -410,7 +410,9 @@ public final class BiogramCloudService {
                 if response?.statusCode == 404 {
                     self.lock.lock()
                     self.publicProfiles.removeValue(forKey: telegramId)
-                    self.publicProfileFetchedAt.removeValue(forKey: telegramId)
+                    // Cache negative lookups too, preventing profile-layout rebuilds from
+                    // repeatedly requesting an account that has no public Biogram profile.
+                    self.publicProfileFetchedAt[telegramId] = Date()
                     self.lock.unlock()
                     DispatchQueue.main.async { completion(nil) }
                 } else {

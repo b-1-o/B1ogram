@@ -94,12 +94,15 @@ func infoItems(
     
     if case let .user(user) = data.peer {
         let biogramTelegramId = String(user.id.id._internalGetInt64Value())
+        let cachedBiogramProfile = BiogramCloudService.shared.cachedPublicProfile(for: biogramTelegramId)
         if !isMyProfile {
-            BiogramCloudService.shared.loadPublicProfile(for: biogramTelegramId) { _ in
-                interaction.requestLayout(animated: true)
+            BiogramCloudService.shared.loadPublicProfile(for: biogramTelegramId) { latestProfile in
+                // Rebuild the profile only when the remote card/profile data actually changed.
+                if latestProfile != cachedBiogramProfile {
+                    interaction.requestLayout(animated: true)
+                }
             }
         }
-        let cachedBiogramProfile = BiogramCloudService.shared.cachedPublicProfile(for: biogramTelegramId)
 
         let ItemCallList = 1000
         let ItemPersonalChannelHeader = 2000
