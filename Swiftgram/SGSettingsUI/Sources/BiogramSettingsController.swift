@@ -177,7 +177,8 @@ private enum BiogramSection: Int32 {
     case color = 3
     case collectibles = 4
     case banner = 5
-    case info = 6
+    case card = 6
+    case info = 8
 }
 
 private final class BiogramControllerState: Equatable {
@@ -188,6 +189,8 @@ private final class BiogramControllerState: Equatable {
     let profileColorEnabled: Bool
     let profileColor: BiogramProfileColor?
     let hasBanner: Bool
+    let profileCardStyle: BiogramProfileCardStyle
+    let hasCardImage: Bool
    
     init(
         premiumEnabled: Bool,
@@ -196,7 +199,9 @@ private final class BiogramControllerState: Equatable {
         collectibles: [BiogramCollectible],
         profileColorEnabled: Bool,
         profileColor: BiogramProfileColor?,
-        hasBanner: Bool
+        hasBanner: Bool,
+        profileCardStyle: BiogramProfileCardStyle,
+        hasCardImage: Bool,
     ) {
         self.premiumEnabled = premiumEnabled
         self.numbers = numbers
@@ -205,6 +210,8 @@ private final class BiogramControllerState: Equatable {
         self.profileColorEnabled = profileColorEnabled
         self.profileColor = profileColor
         self.hasBanner = hasBanner
+        self.profileCardStyle = profileCardStyle
+        self.hasCardImage = hasCardImage
     }
    
     static func == (lhs: BiogramControllerState, rhs: BiogramControllerState) -> Bool {
@@ -215,6 +222,8 @@ private final class BiogramControllerState: Equatable {
             && lhs.profileColorEnabled == rhs.profileColorEnabled
             && lhs.profileColor == rhs.profileColor
             && lhs.hasBanner == rhs.hasBanner
+            && lhs.profileCardStyle == rhs.profileCardStyle
+            && lhs.hasCardImage == rhs.hasCardImage
     }
    
     static func current() -> BiogramControllerState {
@@ -225,7 +234,9 @@ private final class BiogramControllerState: Equatable {
             collectibles: BiogramManager.shared.collectibles(),
             profileColorEnabled: BiogramManager.shared.profileColorEnabled,
             profileColor: BiogramManager.shared.profileColor,
-            hasBanner: BiogramManager.shared.banner() != nil
+            hasBanner: BiogramManager.shared.banner() != nil,
+            profileCardStyle: BiogramManager.shared.profileCardStyle,
+            hasCardImage: BiogramManager.shared.profileCardImage() != nil,
         )
     }
 }
@@ -238,6 +249,7 @@ private enum BiogramEntryId: Hashable {
     case colorPattern(String), colorPatternOpacity
     case collectiblesHeader, collectible(String), addGiftFromLink
     case bannerHeader, bannerPreview, chooseBanner, removeBanner
+    case profileCardHeader, openProfileCard
     case info
 }
 
@@ -263,6 +275,8 @@ private enum BiogramEntry: ItemListNodeEntry {
     case bannerPreview(Bool)
     case chooseBanner
     case removeBanner
+    case profileCardHeader
+    case openProfileCard(BiogramProfileCardStyle, Bool)
     case info
    
     var section: ItemListSectionId {
@@ -274,6 +288,7 @@ private enum BiogramEntry: ItemListNodeEntry {
             return BiogramSection.color.rawValue
         case .collectiblesHeader, .collectible, .addGiftFromLink: return BiogramSection.collectibles.rawValue
         case .bannerHeader, .bannerPreview, .chooseBanner, .removeBanner: return BiogramSection.banner.rawValue
+        case .profileCardHeader, .openProfileCard: return BiogramSection.card.rawValue
         case .info: return BiogramSection.info.rawValue
         }
     }
@@ -301,6 +316,8 @@ private enum BiogramEntry: ItemListNodeEntry {
         case .bannerPreview: return .bannerPreview
         case .chooseBanner: return .chooseBanner
         case .removeBanner: return .removeBanner
+        case .profileCardHeader: return .profileCardHeader
+        case .openProfileCard: return .openProfileCard
         case .info: return .info
         }
     }
@@ -358,8 +375,13 @@ private enum BiogramEntry: ItemListNodeEntry {
             return ItemListActionItem(presentationData: presentationData, title: "Choose from Gallery", kind: .generic, alignment: .natural, sectionId: self.section, style: .blocks, action: { arguments.chooseBanner() })
         case .removeBanner:
             return ItemListActionItem(presentationData: presentationData, title: "Remove Banner", kind: .destructive, alignment: .natural, sectionId: self.section, style: .blocks, action: { arguments.removeBanner() })
+        case .profileCardHeader:
+            return ItemListSectionHeaderItem(presentationData: presentationData, text: "BIOGRAM PROFILE CARD", sectionId: self.section)
+        case let .openProfileCard(style, hasImage):
+            let imageLabel = hasImage ? "Custom artwork" : "Color material"
+            return ItemListDisclosureItem(presentationData: presentationData, title: "Customize 3D card", label: "\(style.paletteName) · \(style.material.capitalized) · \(imageLabel)", sectionId: self.section, style: .blocks, action: { arguments.openProfileCard() })
         case .info:
-            return ItemListTextItem(presentationData: presentationData, text: .plain("Local-only. Visible only in this client. Not sent to Telegram servers. Banner uses original image aspect ratio."), sectionId: self.section)
+            return ItemListTextItem(presentationData: presentationData, text: .plain("Profile color uses Telegram's profile-color system so other users can see it. Your custom card artwork and material are saved on this device. Tap the card to flip it; drag to tilt it in 3D."), sectionId: self.section)
         }
     }
 }
@@ -380,6 +402,7 @@ private final class BiogramArguments {
     let addGiftFromLink: () -> Void
     let chooseBanner: () -> Void
     let removeBanner: () -> Void
+    let openProfileCard: () -> Void
    
     init(
         togglePremium: @escaping (Bool) -> Void,
@@ -396,7 +419,8 @@ private final class BiogramArguments {
         removeCollectible: @escaping (String) -> Void,
         addGiftFromLink: @escaping () -> Void,
         chooseBanner: @escaping () -> Void,
-        removeBanner: @escaping () -> Void
+        removeBanner: @escaping () -> Void,
+        openProfileCard: @escaping () -> Void
     ) {
         self.togglePremium = togglePremium
         self.addNumber = addNumber
@@ -413,23 +437,65 @@ private final class BiogramArguments {
         self.addGiftFromLink = addGiftFromLink
         self.chooseBanner = chooseBanner
         self.removeBanner = removeBanner
+        self.openProfileCard = openProfileCard
     }
+}
+
+private func telegramProfileColor(for color: BiogramProfileColor) -> PeerNameColor {
+    let r = color.r
+    let g = color.g
+    let b = color.b
+    let candidates: [(Double, Double, Double, PeerNameColor)] = [
+        (0.84, 0.20, 0.25, .red),
+        (0.96, 0.52, 0.18, .orange),
+        (0.57, 0.31, 0.86, .violet),
+        (0.20, 0.65, 0.42, .green),
+        (0.10, 0.68, 0.75, .cyan),
+        (0.28, 0.49, 0.93, .blue),
+        (0.91, 0.32, 0.60, .pink)
+    ]
+    guard let nearest = candidates.min(by: { lhs, rhs in
+        let ld = pow(r - lhs.0, 2) + pow(g - lhs.1, 2) + pow(b - lhs.2, 2)
+        let rd = pow(r - rhs.0, 2) + pow(g - rhs.1, 2) + pow(b - rhs.2, 2)
+        return ld < rd
+    }) else { return .blue }
+    return nearest.3
+}
+
+/// Profile accents are written to Telegram's own profile-color API so other Telegram/Biogram users
+/// see the chosen color on the profile. The local RGB value is retained for the richer self preview.
+private func syncTelegramProfileColor(_ color: BiogramProfileColor?, context: AccountContext) {
+    let mappedColor = color.map { telegramProfileColor(for: $0) }
+    let peerSignal = context.engine.data.subscribe(
+        TelegramEngine.EngineData.Item.Peer.Peer(id: context.account.peerId)
+    )
+    |> take(1)
+    |> deliverOnMainQueue
+
+    let _ = peerSignal.start(next: { peer in
+        guard let peer else { return }
+
+        // Keep the user's existing name color and background emoji intact.
+        let nameColor: UpdateNameColor
+        switch peer.nameColor ?? .preset(.blue) {
+        case let .preset(existingColor):
+            nameColor = .preset(color: existingColor, backgroundEmojiId: peer.backgroundEmojiId)
+        case let .collectible(collectibleColor):
+            nameColor = .collectible(collectibleColor)
+        }
+
+        let update = context.engine.accountData.updateNameColorAndEmoji(
+            nameColor: nameColor,
+            profileColor: mappedColor,
+            profileBackgroundEmojiId: nil
+        )
+        let _ = update.start(error: { _ in }, completed: {})
+    })
 }
 
 private func biogramControllerEntries(state: BiogramControllerState) -> [BiogramEntry] {
     var entries: [BiogramEntry] = []
-   
-    entries.append(.premiumHeader)
-    entries.append(.premiumToggle(state.premiumEnabled))
-   
-    entries.append(.numbersHeader)
-    for (i, n) in state.numbers.enumerated() { entries.append(.number(i, n)) }
-    entries.append(.addNumber)
-   
-    entries.append(.aliasesHeader)
-    for (i, a) in state.aliases.enumerated() { entries.append(.alias(i, a)) }
-    entries.append(.addAlias)
-   
+
     entries.append(.colorHeader)
     entries.append(.colorToggle(state.profileColorEnabled))
     if state.profileColorEnabled {
@@ -442,7 +508,6 @@ private func biogramControllerEntries(state: BiogramControllerState) -> [Biogram
             entries.append(.colorPreset(name, preset, selected))
         }
         entries.append(.colorBrightness(current?.brightness ?? 1.0))
-       
         let currentPattern = current?.pattern ?? "none"
         for (title, key) in BiogramProfileColor.patterns {
             entries.append(.colorPattern(title, key, currentPattern == key))
@@ -451,24 +516,26 @@ private func biogramControllerEntries(state: BiogramControllerState) -> [Biogram
             entries.append(.colorPatternOpacity(current?.patternOpacity ?? 0.25))
         }
     }
-   
-    entries.append(.collectiblesHeader)
-    for (i, c) in state.collectibles.enumerated() { entries.append(.collectible(i, c)) }
-    entries.append(.addGiftFromLink)
-   
-    // Banner — без ручной высоты, aspect ratio берётся из картинки (free)
+
     entries.append(.bannerHeader)
     entries.append(.bannerPreview(state.hasBanner))
     entries.append(.chooseBanner)
     if state.hasBanner {
         entries.append(.removeBanner)
     }
-   
+
+    entries.append(.profileCardHeader)
+    entries.append(.openProfileCard(state.profileCardStyle, state.hasCardImage))
+
     entries.append(.info)
     return entries
 }
 
 public func biogramSettingsController(context: AccountContext) -> ViewController {
+    // Preserve the existing Biogram account key for its local preferences.
+    let accountId = String(context.account.peerId.toInt64())
+    // Use Telegram's raw numeric account ID for the decorative card signature.
+    let fogWalletAccountId = String(context.account.peerId.id._internalGetInt64Value())
     let initialState = BiogramControllerState.current()
     let statePromise = ValuePromise(initialState, ignoreRepeated: true)
     let stateValue = Atomic(value: initialState)
@@ -478,13 +545,12 @@ public func biogramSettingsController(context: AccountContext) -> ViewController
         statePromise.set(newState)
     }
     // === Biogram: загружаем настройки именно текущего Telegram-аккаунта ===
-    let accountId = String(context.account.peerId.toInt64())
     BiogramManager.shared.switchToAccount(accountId: accountId) {
         updateState()
     }
     // =====================================================================
     var presentControllerImpl: ((ViewController, Any?) -> Void)?
-   
+
     let arguments = BiogramArguments(
         togglePremium: { enabled in
             BiogramManager.shared.setLocalPremiumEnabled(enabled) {
@@ -580,6 +646,7 @@ public func biogramSettingsController(context: AccountContext) -> ViewController
             BiogramManager.shared.setProfileColor(current, enabled: enabled) {
                 Queue.mainQueue().async { updateState() }
             }
+            syncTelegramProfileColor(enabled ? current : nil, context: context)
         },
         selectPreset: { color in
             let existing = BiogramManager.shared.profileColor
@@ -594,6 +661,7 @@ public func biogramSettingsController(context: AccountContext) -> ViewController
             BiogramManager.shared.setProfileColor(newColor, enabled: true) {
                 Queue.mainQueue().async { updateState() }
             }
+            syncTelegramProfileColor(newColor, context: context)
         },
         setBrightness: { value in
             guard var color = BiogramManager.shared.profileColor else { return }
@@ -677,6 +745,13 @@ public func biogramSettingsController(context: AccountContext) -> ViewController
             BiogramManager.shared.setBannerImage(nil) {
                 Queue.mainQueue().async { updateState() }
             }
+        },
+        openProfileCard: {
+            presentControllerImpl?(BiogramProfileCardDesignerController(
+                context: context,
+                accountId: accountId,
+                userId: fogWalletAccountId
+            ), nil)
         }
     )
    
@@ -705,5 +780,618 @@ public func biogramSettingsController(context: AccountContext) -> ViewController
     presentControllerImpl = { [weak controller] c, a in
         controller?.present(c, in: .window(.root), with: a)
     }
+
     return controller
+}
+// MARK: - Fog Wallet cards
+
+private func fogWalletColor(_ hex: String) -> UIColor {
+    var value = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+    if value.count != 6 { value = "171719" }
+    var rgb: UInt64 = 0
+    Scanner(string: value).scanHexInt64(&rgb)
+    return UIColor(
+        red: CGFloat((rgb >> 16) & 0xff) / 255.0,
+        green: CGFloat((rgb >> 8) & 0xff) / 255.0,
+        blue: CGFloat(rgb & 0xff) / 255.0,
+        alpha: 1.0
+    )
+}
+
+private func biogramCardColor(_ hex: String) -> UIColor {
+    var value = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+    if value.count != 6 { value = "171719" }
+    var rgb: UInt64 = 0
+    Scanner(string: value).scanHexInt64(&rgb)
+    return UIColor(
+        red: CGFloat((rgb >> 16) & 0xff) / 255.0,
+        green: CGFloat((rgb >> 8) & 0xff) / 255.0,
+        blue: CGFloat(rgb & 0xff) / 255.0,
+        alpha: 1.0
+    )
+}
+
+private func biogramCardPalette(_ name: String) -> (UIColor, UIColor) {
+    let preset = BiogramProfileColor.presets.first(where: { $0.0 == name })?.1
+        ?? BiogramProfileColor.presets.first(where: { $0.0 == "Dark Red" })!.1
+    let main = UIColor(
+        red: CGFloat(preset.r),
+        green: CGFloat(preset.g),
+        blue: CGFloat(preset.b),
+        alpha: 1.0
+    )
+    let shade = UIColor(
+        red: CGFloat(preset.r * 0.52),
+        green: CGFloat(preset.g * 0.52),
+        blue: CGFloat(preset.b * 0.58),
+        alpha: 1.0
+    )
+    return (main, shade)
+}
+
+private func biogramCardSignature(_ userId: String) -> String {
+    var hash: UInt64 = 1469598103934665603
+    for byte in userId.utf8 {
+        hash = (hash ^ UInt64(byte)) &* 1099511628211
+    }
+    return String(format: "B1O  ·  %04X  ·  %04X  ·  %04X", (hash >> 32) & 0xffff, (hash >> 16) & 0xffff, hash & 0xffff)
+}
+
+private final class Biogram3DProfileCardView: UIView {
+    private let cardContainer = UIView()
+    private let front = UIView()
+    private let back = UIView()
+    private let frontGradient = CAGradientLayer()
+    private let frontArtwork = UIImageView()
+    private let frontSheen = CAGradientLayer()
+    private let backGradient = CAGradientLayer()
+    private let backSheen = CAGradientLayer()
+    private let brandLabel = UILabel()
+    private let editionLabel = UILabel()
+    private let chipView = UIView()
+    private let nameLabel = UILabel()
+    private let handleLabel = UILabel()
+    private let frontSignatureLabel = UILabel()
+    private let backTitleLabel = UILabel()
+    private let backHandleLabel = UILabel()
+    private let backIdLabel = UILabel()
+    private let backSignatureLabel = UILabel()
+    private let backFooterLabel = UILabel()
+    private var style = BiogramProfileCardStyle()
+    private var userName = "BIOGRAM MEMBER"
+    private var userHandle = "@biogram"
+    private var userId = "—"
+    private var showingBack = false
+    private var tiltX: CGFloat = 0.0
+    private var tiltY: CGFloat = 0.0
+    private var panOrigin = CGPoint.zero
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        self.isUserInteractionEnabled = true
+        self.cardContainer.layer.cornerRadius = 25
+        self.cardContainer.layer.masksToBounds = false
+        self.cardContainer.layer.shadowColor = UIColor.black.cgColor
+        self.cardContainer.layer.shadowOpacity = 0.42
+        self.cardContainer.layer.shadowRadius = 24
+        self.cardContainer.layer.shadowOffset = CGSize(width: 0, height: 14)
+        self.addSubview(self.cardContainer)
+
+        for face in [self.front, self.back] {
+            face.layer.cornerRadius = 25
+            face.layer.masksToBounds = true
+            face.layer.borderWidth = 1
+            face.layer.borderColor = UIColor.white.withAlphaComponent(0.30).cgColor
+            face.layer.isDoubleSided = false
+            self.cardContainer.addSubview(face)
+        }
+        self.back.layer.transform = CATransform3DMakeRotation(.pi, 0.0, 1.0, 0.0)
+
+        self.frontGradient.startPoint = CGPoint(x: 0.0, y: 0.0)
+        self.frontGradient.endPoint = CGPoint(x: 1.0, y: 1.0)
+        self.front.layer.insertSublayer(self.frontGradient, at: 0)
+
+        self.frontArtwork.contentMode = .scaleAspectFill
+        self.frontArtwork.clipsToBounds = true
+        self.frontArtwork.isUserInteractionEnabled = false
+        self.front.addSubview(self.frontArtwork)
+
+        self.frontSheen.startPoint = CGPoint(x: 0.0, y: 0.0)
+        self.frontSheen.endPoint = CGPoint(x: 1.0, y: 1.0)
+        self.frontSheen.locations = [0.0, 0.42, 0.6, 1.0]
+        let frontSheenHost = UIView()
+        frontSheenHost.isUserInteractionEnabled = false
+        frontSheenHost.layer.addSublayer(self.frontSheen)
+        self.front.addSubview(frontSheenHost)
+        frontSheenHost.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            frontSheenHost.topAnchor.constraint(equalTo: self.front.topAnchor),
+            frontSheenHost.leadingAnchor.constraint(equalTo: self.front.leadingAnchor),
+            frontSheenHost.trailingAnchor.constraint(equalTo: self.front.trailingAnchor),
+            frontSheenHost.bottomAnchor.constraint(equalTo: self.front.bottomAnchor)
+        ])
+
+        self.brandLabel.text = "BIOGRAM"
+        self.brandLabel.font = UIFont.systemFont(ofSize: 12, weight: .heavy)
+        self.brandLabel.textColor = UIColor.white.withAlphaComponent(0.96)
+        self.front.addSubview(self.brandLabel)
+
+        self.editionLabel.text = "PRIVATE PROFILE"
+        self.editionLabel.font = UIFont.monospacedSystemFont(ofSize: 8, weight: .semibold)
+        self.editionLabel.textColor = UIColor.white.withAlphaComponent(0.76)
+        self.editionLabel.textAlignment = .right
+        self.front.addSubview(self.editionLabel)
+
+        self.chipView.backgroundColor = UIColor.white.withAlphaComponent(0.15)
+        self.chipView.layer.cornerRadius = 7
+        self.chipView.layer.borderWidth = 1
+        self.chipView.layer.borderColor = UIColor.white.withAlphaComponent(0.58).cgColor
+        self.chipView.isUserInteractionEnabled = false
+        self.front.addSubview(self.chipView)
+        for fraction in [CGFloat(0.33), CGFloat(0.66)] {
+            let line = UIView()
+            line.backgroundColor = UIColor.white.withAlphaComponent(0.34)
+            self.chipView.addSubview(line)
+            line.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                line.topAnchor.constraint(equalTo: self.chipView.topAnchor, constant: 4),
+                line.bottomAnchor.constraint(equalTo: self.chipView.bottomAnchor, constant: -4),
+                line.widthAnchor.constraint(equalToConstant: 1),
+                line.leadingAnchor.constraint(equalTo: self.chipView.leadingAnchor, constant: 44 * fraction)
+            ])
+        }
+
+        self.nameLabel.font = UIFont.systemFont(ofSize: 21, weight: .semibold)
+        self.nameLabel.textColor = .white
+        self.nameLabel.adjustsFontSizeToFitWidth = true
+        self.nameLabel.minimumScaleFactor = 0.72
+        self.front.addSubview(self.nameLabel)
+
+        self.handleLabel.font = UIFont.systemFont(ofSize: 11, weight: .medium)
+        self.handleLabel.textColor = UIColor.white.withAlphaComponent(0.75)
+        self.front.addSubview(self.handleLabel)
+
+        self.frontSignatureLabel.font = UIFont.monospacedSystemFont(ofSize: 9, weight: .medium)
+        self.frontSignatureLabel.textColor = UIColor.white.withAlphaComponent(0.75)
+        self.front.addSubview(self.frontSignatureLabel)
+
+        self.backGradient.startPoint = CGPoint(x: 0, y: 0)
+        self.backGradient.endPoint = CGPoint(x: 1, y: 1)
+        self.back.layer.insertSublayer(self.backGradient, at: 0)
+        self.backSheen.startPoint = CGPoint(x: 0.0, y: 0.2)
+        self.backSheen.endPoint = CGPoint(x: 1.0, y: 0.8)
+        self.back.layer.addSublayer(self.backSheen)
+
+        self.backTitleLabel.text = "BIOGRAM  /  PROFILE"
+        self.backTitleLabel.font = UIFont.monospacedSystemFont(ofSize: 10, weight: .bold)
+        self.backTitleLabel.textColor = UIColor.white.withAlphaComponent(0.74)
+        self.back.addSubview(self.backTitleLabel)
+
+        self.backHandleLabel.font = UIFont.systemFont(ofSize: 17, weight: .semibold)
+        self.backHandleLabel.textColor = .white
+        self.backHandleLabel.adjustsFontSizeToFitWidth = true
+        self.backHandleLabel.minimumScaleFactor = 0.75
+        self.back.addSubview(self.backHandleLabel)
+
+        self.backIdLabel.font = UIFont.monospacedSystemFont(ofSize: 11, weight: .medium)
+        self.backIdLabel.textColor = UIColor.white.withAlphaComponent(0.78)
+        self.back.addSubview(self.backIdLabel)
+
+        self.backSignatureLabel.font = UIFont.monospacedSystemFont(ofSize: 12, weight: .semibold)
+        self.backSignatureLabel.textColor = biogramCardColor("#E8D9C4")
+        self.back.addSubview(self.backSignatureLabel)
+
+        self.backFooterLabel.text = "PROFILE SIGNATURE  ·  NOT A PAYMENT CARD"
+        self.backFooterLabel.font = UIFont.monospacedSystemFont(ofSize: 7.5, weight: .medium)
+        self.backFooterLabel.textColor = UIColor.white.withAlphaComponent(0.55)
+        self.backFooterLabel.adjustsFontSizeToFitWidth = true
+        self.backFooterLabel.minimumScaleFactor = 0.7
+        self.back.addSubview(self.backFooterLabel)
+
+        for view in [
+            self.brandLabel, self.editionLabel, self.chipView, self.nameLabel,
+            self.handleLabel, self.frontSignatureLabel, self.backTitleLabel,
+            self.backHandleLabel, self.backIdLabel, self.backSignatureLabel, self.backFooterLabel
+        ] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+        }
+
+        NSLayoutConstraint.activate([
+            self.brandLabel.topAnchor.constraint(equalTo: self.front.topAnchor, constant: 20),
+            self.brandLabel.leadingAnchor.constraint(equalTo: self.front.leadingAnchor, constant: 22),
+            self.editionLabel.centerYAnchor.constraint(equalTo: self.brandLabel.centerYAnchor),
+            self.editionLabel.trailingAnchor.constraint(equalTo: self.front.trailingAnchor, constant: -22),
+            self.editionLabel.leadingAnchor.constraint(greaterThanOrEqualTo: self.brandLabel.trailingAnchor, constant: 8),
+
+            self.chipView.topAnchor.constraint(equalTo: self.brandLabel.bottomAnchor, constant: 22),
+            self.chipView.leadingAnchor.constraint(equalTo: self.front.leadingAnchor, constant: 22),
+            self.chipView.widthAnchor.constraint(equalToConstant: 44),
+            self.chipView.heightAnchor.constraint(equalToConstant: 32),
+
+            self.nameLabel.leadingAnchor.constraint(equalTo: self.front.leadingAnchor, constant: 22),
+            self.nameLabel.trailingAnchor.constraint(equalTo: self.front.trailingAnchor, constant: -22),
+            self.nameLabel.bottomAnchor.constraint(equalTo: self.handleLabel.topAnchor, constant: -2),
+            self.handleLabel.leadingAnchor.constraint(equalTo: self.front.leadingAnchor, constant: 22),
+            self.handleLabel.trailingAnchor.constraint(equalTo: self.front.trailingAnchor, constant: -22),
+            self.handleLabel.bottomAnchor.constraint(equalTo: self.frontSignatureLabel.topAnchor, constant: -13),
+            self.frontSignatureLabel.leadingAnchor.constraint(equalTo: self.front.leadingAnchor, constant: 22),
+            self.frontSignatureLabel.trailingAnchor.constraint(equalTo: self.front.trailingAnchor, constant: -22),
+            self.frontSignatureLabel.bottomAnchor.constraint(equalTo: self.front.bottomAnchor, constant: -18),
+
+            self.backTitleLabel.topAnchor.constraint(equalTo: self.back.topAnchor, constant: 23),
+            self.backTitleLabel.leadingAnchor.constraint(equalTo: self.back.leadingAnchor, constant: 22),
+            self.backTitleLabel.trailingAnchor.constraint(equalTo: self.back.trailingAnchor, constant: -22),
+            self.backHandleLabel.topAnchor.constraint(equalTo: self.backTitleLabel.bottomAnchor, constant: 25),
+            self.backHandleLabel.leadingAnchor.constraint(equalTo: self.back.leadingAnchor, constant: 22),
+            self.backHandleLabel.trailingAnchor.constraint(equalTo: self.back.trailingAnchor, constant: -22),
+            self.backIdLabel.topAnchor.constraint(equalTo: self.backHandleLabel.bottomAnchor, constant: 8),
+            self.backIdLabel.leadingAnchor.constraint(equalTo: self.back.leadingAnchor, constant: 22),
+            self.backIdLabel.trailingAnchor.constraint(equalTo: self.back.trailingAnchor, constant: -22),
+            self.backSignatureLabel.leadingAnchor.constraint(equalTo: self.back.leadingAnchor, constant: 22),
+            self.backSignatureLabel.trailingAnchor.constraint(equalTo: self.back.trailingAnchor, constant: -22),
+            self.backSignatureLabel.bottomAnchor.constraint(equalTo: self.backFooterLabel.topAnchor, constant: -17),
+            self.backFooterLabel.leadingAnchor.constraint(equalTo: self.back.leadingAnchor, constant: 22),
+            self.backFooterLabel.trailingAnchor.constraint(equalTo: self.back.trailingAnchor, constant: -22),
+            self.backFooterLabel.bottomAnchor.constraint(equalTo: self.back.bottomAnchor, constant: -19)
+        ])
+
+        let tap = UITapGestureRecognizer(target: self, action: #selector(flip))
+        self.addGestureRecognizer(tap)
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+        pan.maximumNumberOfTouches = 1
+        self.addGestureRecognizer(pan)
+        tap.require(toFail: pan)
+        self.configure(style: self.style, image: nil, displayName: self.userName, username: self.userHandle, userId: self.userId)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        self.cardContainer.frame = self.bounds
+        self.front.frame = self.cardContainer.bounds
+        self.back.frame = self.cardContainer.bounds
+        self.frontGradient.frame = self.front.bounds
+        self.frontArtwork.frame = self.front.bounds
+        self.frontSheen.frame = self.front.bounds
+        self.backGradient.frame = self.back.bounds
+        self.backSheen.frame = self.back.bounds
+        self.cardContainer.layer.shadowPath = UIBezierPath(roundedRect: self.cardContainer.bounds, cornerRadius: 25).cgPath
+        self.applyTransform(animated: false)
+    }
+
+    func configure(
+        style: BiogramProfileCardStyle,
+        image: UIImage?,
+        displayName: String,
+        username: String,
+        userId: String
+    ) {
+        self.style = style
+        self.userName = displayName.isEmpty ? "BIOGRAM MEMBER" : displayName.uppercased()
+        self.userHandle = username.isEmpty ? "@BIOGRAM" : username
+        self.userId = userId
+
+        let (main, shade) = biogramCardPalette(style.paletteName)
+        self.frontGradient.colors = [main.cgColor, shade.cgColor, biogramCardColor("#101014").cgColor]
+        self.frontArtwork.image = image
+        self.frontArtwork.isHidden = image == nil
+        self.brandLabel.text = "BIOGRAM"
+        self.nameLabel.text = self.userName
+        self.handleLabel.text = self.userHandle.hasPrefix("@") ? self.userHandle : "@\(self.userHandle)"
+        self.frontSignatureLabel.text = biogramCardSignature(userId)
+        self.backHandleLabel.text = self.handleLabel.text
+        self.backIdLabel.text = "TELEGRAM ID  /  \(userId)"
+        self.backSignatureLabel.text = biogramCardSignature(userId)
+        self.backGradient.colors = [shade.cgColor, biogramCardColor("#111114").cgColor, main.withAlphaComponent(0.40).cgColor]
+
+        switch style.material {
+        case "matte":
+            self.frontSheen.colors = [UIColor.white.withAlphaComponent(0.14).cgColor, UIColor.white.withAlphaComponent(0.035).cgColor, UIColor.clear.cgColor, UIColor.white.withAlphaComponent(0.025).cgColor]
+            self.frontSheen.opacity = 0.48
+            self.backSheen.colors = [UIColor.white.withAlphaComponent(0.10).cgColor, UIColor.clear.cgColor, UIColor.white.withAlphaComponent(0.025).cgColor]
+            self.backSheen.opacity = 0.42
+        case "metallic":
+            self.frontSheen.colors = [UIColor.white.withAlphaComponent(0.45).cgColor, UIColor.white.withAlphaComponent(0.05).cgColor, UIColor.black.withAlphaComponent(0.15).cgColor, UIColor.white.withAlphaComponent(0.28).cgColor, UIColor.clear.cgColor]
+            self.frontSheen.locations = [0.0, 0.22, 0.42, 0.66, 1.0]
+            self.frontSheen.opacity = 0.8
+            self.backSheen.colors = [UIColor.white.withAlphaComponent(0.28).cgColor, UIColor.clear.cgColor, UIColor.black.withAlphaComponent(0.12).cgColor, UIColor.white.withAlphaComponent(0.18).cgColor]
+            self.backSheen.opacity = 0.72
+        default:
+            self.frontSheen.colors = [UIColor.white.withAlphaComponent(0.44).cgColor, UIColor.white.withAlphaComponent(0.08).cgColor, UIColor.clear.cgColor, UIColor.white.withAlphaComponent(0.12).cgColor]
+            self.frontSheen.locations = [0.0, 0.24, 0.56, 1.0]
+            self.frontSheen.opacity = 0.76
+            self.backSheen.colors = [UIColor.white.withAlphaComponent(0.24).cgColor, UIColor.clear.cgColor, UIColor.white.withAlphaComponent(0.08).cgColor]
+            self.backSheen.opacity = 0.64
+        }
+        self.setNeedsLayout()
+    }
+
+    @objc private func flip() {
+        self.showingBack.toggle()
+        self.tiltX = 0
+        self.tiltY = 0
+        self.applyTransform(animated: true)
+    }
+
+    @objc private func handlePan(_ gesture: UIPanGestureRecognizer) {
+        let point = gesture.translation(in: self)
+        switch gesture.state {
+        case .began:
+            self.panOrigin = CGPoint(x: self.tiltX, y: self.tiltY)
+        case .changed:
+            self.tiltY = max(-0.42, min(0.42, self.panOrigin.y + point.x / max(1.0, self.bounds.width) * 0.9))
+            self.tiltX = max(-0.24, min(0.24, self.panOrigin.x - point.y / max(1.0, self.bounds.height) * 0.55))
+            self.applyTransform(animated: false)
+        case .ended, .cancelled, .failed:
+            self.tiltX = 0
+            self.tiltY = 0
+            self.applyTransform(animated: true)
+        default:
+            break
+        }
+    }
+
+    private func applyTransform(animated: Bool) {
+        var transform = CATransform3DIdentity
+        transform.m34 = -1.0 / 720.0
+        transform = CATransform3DRotate(transform, (self.showingBack ? CGFloat.pi : 0.0) + self.tiltY, 0.0, 1.0, 0.0)
+        transform = CATransform3DRotate(transform, self.tiltX, 1.0, 0.0, 0.0)
+        let changes = {
+            self.cardContainer.layer.transform = transform
+        }
+        if animated {
+            UIView.animate(withDuration: 0.48, delay: 0, usingSpringWithDamping: 0.78, initialSpringVelocity: 0.3, options: [.beginFromCurrentState, .allowUserInteraction], animations: changes)
+        } else {
+            changes()
+        }
+    }
+}
+
+private final class BiogramCardArtworkPickerDelegate: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+    static let shared = BiogramCardArtworkPickerDelegate()
+    var onPicked: ((UIImage?) -> Void)?
+
+    func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+        let image = (info[.originalImage] as? UIImage) ?? (info[.editedImage] as? UIImage)
+        self.onPicked?(image)
+        picker.dismiss(animated: true)
+    }
+
+    func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+        picker.dismiss(animated: true)
+    }
+}
+
+private final class BiogramActionButton: UIButton {
+    var handler: (() -> Void)?
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        self.addTarget(self, action: #selector(runHandler), for: .touchUpInside)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    @objc private func runHandler() {
+        self.handler?()
+    }
+}
+
+private final class BiogramProfileCardDesignerController: ViewController {
+    private let context: AccountContext
+    private let accountId: String
+    private let userId: String
+    private var username = "@BIOGRAM"
+    private var displayName = "BIOGRAM MEMBER"
+    private var style: BiogramProfileCardStyle
+    private let scrollView = UIScrollView()
+    private let contentStack = UIStackView()
+    private let cardView = Biogram3DProfileCardView()
+
+    init(context: AccountContext, accountId: String, userId: String) {
+        self.context = context
+        self.accountId = accountId
+        self.userId = userId
+        self.style = BiogramManager.shared.profileCardStyle
+        super.init(navigationBarPresentationData: nil)
+    }
+
+    required init(coder: NSCoder) { fatalError() }
+
+    override func loadDisplayNode() {
+        self.displayNode = ASDisplayNode()
+        self.displayNode.backgroundColor = biogramCardColor("#09090B")
+        let root = self.displayNode.view
+        root.backgroundColor = biogramCardColor("#09090B")
+
+        self.scrollView.alwaysBounceVertical = true
+        self.scrollView.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(self.scrollView)
+        self.contentStack.axis = .vertical
+        self.contentStack.alignment = .fill
+        self.contentStack.spacing = 17
+        self.contentStack.translatesAutoresizingMaskIntoConstraints = false
+        self.scrollView.addSubview(self.contentStack)
+        NSLayoutConstraint.activate([
+            self.scrollView.topAnchor.constraint(equalTo: root.safeAreaLayoutGuide.topAnchor),
+            self.scrollView.leadingAnchor.constraint(equalTo: root.leadingAnchor),
+            self.scrollView.trailingAnchor.constraint(equalTo: root.trailingAnchor),
+            self.scrollView.bottomAnchor.constraint(equalTo: root.bottomAnchor),
+            self.contentStack.topAnchor.constraint(equalTo: self.scrollView.contentLayoutGuide.topAnchor, constant: 18),
+            self.contentStack.leadingAnchor.constraint(equalTo: self.scrollView.contentLayoutGuide.leadingAnchor, constant: 18),
+            self.contentStack.trailingAnchor.constraint(equalTo: self.scrollView.contentLayoutGuide.trailingAnchor, constant: -18),
+            self.contentStack.bottomAnchor.constraint(equalTo: self.scrollView.contentLayoutGuide.bottomAnchor, constant: -28),
+            self.contentStack.widthAnchor.constraint(equalTo: self.scrollView.frameLayoutGuide.widthAnchor, constant: -36)
+        ])
+
+        self.addTopBar()
+        self.addCardPreview()
+        self.addArtworkControls()
+        self.addPaletteControls()
+        self.addMaterialControls()
+        self.addFooter()
+        self.refreshCard()
+        self.loadCurrentTelegramIdentity()
+    }
+
+    private func label(_ text: String, size: CGFloat, weight: UIFont.Weight = .regular, color: UIColor = .white, lines: Int = 0) -> UILabel {
+        let label = UILabel()
+        label.text = text
+        label.font = UIFont.systemFont(ofSize: size, weight: weight)
+        label.textColor = color
+        label.numberOfLines = lines
+        label.adjustsFontSizeToFitWidth = true
+        label.minimumScaleFactor = 0.78
+        return label
+    }
+
+    private func button(_ title: String, selected: Bool = false, handler: @escaping () -> Void) -> UIButton {
+        let button = BiogramActionButton(frame: .zero)
+        button.handler = handler
+        button.setTitle(title, for: .normal)
+        button.titleLabel?.font = UIFont.systemFont(ofSize: 13, weight: .semibold)
+        button.setTitleColor(selected ? biogramCardColor("#121214") : .white, for: .normal)
+        button.backgroundColor = selected ? biogramCardColor("#E7D7C0") : biogramCardColor("#202024")
+        button.layer.cornerRadius = 12
+        button.layer.borderWidth = selected ? 0 : 1
+        button.layer.borderColor = UIColor.white.withAlphaComponent(0.10).cgColor
+        button.contentEdgeInsets = UIEdgeInsets(top: 11, left: 12, bottom: 11, right: 12)
+        return button
+    }
+
+    private func addTopBar() {
+        let row = UIStackView()
+        row.axis = .horizontal
+        row.alignment = .center
+        row.distribution = .equalSpacing
+        row.addArrangedSubview(self.button("‹  Biogram") { [weak self] in self?.dismiss(animated: true) })
+        row.addArrangedSubview(self.label("CARD STUDIO", size: 10, weight: .bold, color: biogramCardColor("#E7D7C0")))
+        self.contentStack.addArrangedSubview(row)
+        self.contentStack.addArrangedSubview(self.label("Your profile. Your signature.", size: 25, weight: .semibold, color: .white, lines: 2))
+        self.contentStack.addArrangedSubview(self.label("A two-sided profile card with real perspective, touch tilt and separate front/back layers.", size: 13, color: UIColor.white.withAlphaComponent(0.57), lines: 0))
+    }
+
+    private func addCardPreview() {
+        self.cardView.translatesAutoresizingMaskIntoConstraints = false
+        self.contentStack.addArrangedSubview(self.cardView)
+        self.cardView.heightAnchor.constraint(equalTo: self.cardView.widthAnchor, multiplier: 0.63).isActive = true
+        self.contentStack.addArrangedSubview(self.label("TAP TO FLIP  ·  DRAG TO TILT", size: 9, weight: .semibold, color: UIColor.white.withAlphaComponent(0.48)))
+    }
+
+    private func addArtworkControls() {
+        self.contentStack.addArrangedSubview(self.label("FRONT ARTWORK", size: 10, weight: .bold, color: biogramCardColor("#E7D7C0")))
+        let row = UIStackView()
+        row.axis = .horizontal
+        row.distribution = .fillEqually
+        row.spacing = 8
+        row.addArrangedSubview(self.button("Choose image") { [weak self] in self?.chooseArtwork() })
+        row.addArrangedSubview(self.button("Use color only") { [weak self] in
+            guard let self else { return }
+            BiogramManager.shared.setProfileCardImage(nil) { [weak self] in
+                guard let self else { return }
+                self.refreshCard()
+            }
+        })
+        self.contentStack.addArrangedSubview(row)
+    }
+
+    private func addPaletteControls() {
+        self.contentStack.addArrangedSubview(self.label("COLOR MATERIAL", size: 10, weight: .bold, color: biogramCardColor("#E7D7C0")))
+        let paletteNames = BiogramProfileColor.presets.map { $0.0 }
+        for start in stride(from: 0, to: paletteNames.count, by: 2) {
+            let row = UIStackView()
+            row.axis = .horizontal
+            row.distribution = .fillEqually
+            row.spacing = 8
+            for name in paletteNames[start..<min(start + 2, paletteNames.count)] {
+                let (main, _) = biogramCardPalette(name)
+                let selected = self.style.paletteName == name
+                let choice = self.button("●   \(name)", selected: selected) { [weak self] in
+                    guard let self else { return }
+                    self.style.paletteName = name
+                    self.saveStyle()
+                }
+                choice.setTitleColor(selected ? biogramCardColor("#111114") : main, for: .normal)
+                row.addArrangedSubview(choice)
+            }
+            if row.arrangedSubviews.count == 1 {
+                row.addArrangedSubview(UIView())
+            }
+            self.contentStack.addArrangedSubview(row)
+        }
+    }
+
+    private func addMaterialControls() {
+        self.contentStack.addArrangedSubview(self.label("SURFACE FINISH", size: 10, weight: .bold, color: biogramCardColor("#E7D7C0")))
+        let row = UIStackView()
+        row.axis = .horizontal
+        row.distribution = .fillEqually
+        row.spacing = 8
+        for (title, value) in BiogramProfileCardStyle.materials {
+            row.addArrangedSubview(self.button(title, selected: self.style.material == value) { [weak self] in
+                guard let self else { return }
+                self.style.material = value
+                self.saveStyle()
+            })
+        }
+        self.contentStack.addArrangedSubview(row)
+    }
+
+    private func addFooter() {
+        self.contentStack.addArrangedSubview(self.label("The ID and profile signature are decorative identity details, not a payment credential. Your chosen artwork and material are saved locally on this device.", size: 11, color: UIColor.white.withAlphaComponent(0.43), lines: 0))
+    }
+
+    private func chooseArtwork() {
+        guard UIImagePickerController.isSourceTypeAvailable(.photoLibrary) else { return }
+        let picker = UIImagePickerController()
+        picker.sourceType = .photoLibrary
+        picker.allowsEditing = false
+        picker.delegate = BiogramCardArtworkPickerDelegate.shared
+        BiogramCardArtworkPickerDelegate.shared.onPicked = { [weak self] image in
+            guard let self, let image else { return }
+            BiogramManager.shared.setProfileCardImage(image) { [weak self] in
+                guard let self else { return }
+                self.refreshCard()
+            }
+        }
+        self.present(PickerWrapper(picker: picker), in: .window(.root), with: nil)
+    }
+
+    private func saveStyle() {
+        BiogramManager.shared.setProfileCardStyle(self.style) { [weak self] in
+            guard let self else { return }
+            self.refreshCard()
+        }
+    }
+
+    private func refreshCard() {
+        self.style = BiogramManager.shared.profileCardStyle
+        self.cardView.configure(
+            style: self.style,
+            image: BiogramManager.shared.profileCardImage(),
+            displayName: self.displayName,
+            username: self.username,
+            userId: self.userId
+        )
+        self.view.setNeedsLayout()
+    }
+
+    private func loadCurrentTelegramIdentity() {
+        let signal = self.context.engine.data.subscribe(
+            TelegramEngine.EngineData.Item.Peer.Peer(id: self.context.account.peerId)
+        )
+        |> take(1)
+        |> deliverOnMainQueue
+        let _ = signal.start(next: { [weak self] peer in
+            guard let self, let peer else { return }
+            self.displayName = peer.compactDisplayTitle
+            if let username = peer.usernames.first(where: { $0.flags.contains(.isActive) })?.username, !username.isEmpty {
+                self.username = "@\(username)"
+            } else {
+                self.username = "@biogram"
+            }
+            self.refreshCard()
+        })
+    }
 }

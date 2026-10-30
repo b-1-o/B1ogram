@@ -29,6 +29,7 @@ public final class BiogramManager {
     private var cachedCollectibles: [BiogramCollectible]
     private var cachedBanner: BiogramBanner?
     private var cachedBannerImage: UIImage?
+    private var cachedProfileCardImage: UIImage?
 
     /// True after the user changes/removes the banner and until
     /// the application is launched again.
@@ -47,6 +48,7 @@ public final class BiogramManager {
         self.cachedCollectibles = []
         self.cachedBanner = nil
         self.cachedBannerImage = nil
+        self.cachedProfileCardImage = nil
         self._bannerRestartRequired = false
     }
 
@@ -108,6 +110,13 @@ public final class BiogramManager {
                     bannerImage = image
                 }
             }
+            var profileCardImage: UIImage?
+            if let filename = payload.customizations.profileCardStyle?.imageFilename {
+                let url = Self.profileCardsDirectory().appendingPathComponent(filename)
+                if let data = try? Data(contentsOf: url), let image = UIImage(data: data) {
+                    profileCardImage = image
+                }
+            }
 
             DispatchQueue.main.async { [weak self] in
                 guard let self else {
@@ -125,6 +134,7 @@ public final class BiogramManager {
                 self.cachedCollectibles = payload.collectibles
                 self.cachedBanner = payload.banner
                 self.cachedBannerImage = bannerImage
+                self.cachedProfileCardImage = profileCardImage
 
                 // The new banner is now the active banner because it has
                 // been loaded from disk during application/account startup.
@@ -232,7 +242,103 @@ public final class BiogramManager {
         return self.cachedCustomizations.profileColor
     }
 
+    public var profileCardStyle: BiogramProfileCardStyle {
+        return self.cachedCustomizations.profileCardStyle ?? BiogramProfileCardStyle()
+    }
+
+    public func profileCardImage() -> UIImage? {
+        return self.cachedProfileCardImage
+    }
+
     // MARK: - Mutations
+    public func setProfileCardStyle(
+        _ style: BiogramProfileCardStyle,
+        completion: (() -> Void)? = nil
+    ) {
+        var custom = self.cachedCustomizations
+        var normalized = BiogramProfileCardStyle(
+            paletteName: style.paletteName,
+            material: style.material,
+            imageFilename: custom.profileCardStyle?.imageFilename
+        )
+        normalized.imageFilename = custom.profileCardStyle?.imageFilename
+        custom.profileCardStyle = normalized
+        self.cachedCustomizations = custom
+        self.notifyStateChanged()
+        self.storage.setCustomizations(custom, completion: completion)
+    }
+
+    /// Stores card artwork locally. No activation code, serial or server-issued card is involved.
+    public func setProfileCardImage(
+        _ image: UIImage?,
+        completion: (() -> Void)? = nil
+    ) {
+        let oldFilename = self.cachedCustomizations.profileCardStyle?.imageFilename
+        let accountId = self.currentAccountId
+
+        guard let image, image.size.width > 0, image.size.height > 0 else {
+            var custom = self.cachedCustomizations
+            var style = custom.profileCardStyle ?? BiogramProfileCardStyle()
+            style.imageFilename = nil
+            custom.profileCardStyle = style
+            self.cachedCustomizations = custom
+            self.cachedProfileCardImage = nil
+            self.notifyStateChanged()
+            self.storage.setCustomizations(custom) { [weak self] in
+                guard let self else { completion?(); return }
+                if let oldFilename {
+                    self.bannerIOQueue.async {
+                        try? FileManager.default.removeItem(at: Self.profileCardsDirectory().appendingPathComponent(oldFilename))
+                    }
+                }
+                DispatchQueue.main.async { completion?() }
+            }
+            return
+        }
+
+        let filename = "card_\(UUID().uuidString).jpg"
+        let directory = Self.profileCardsDirectory()
+        let targetURL = directory.appendingPathComponent(filename)
+        let optimized = Self.optimizedBannerImage(image, maxDimension: 1600)
+        self.bannerIOQueue.async { [weak self] in
+            guard let self else { DispatchQueue.main.async { completion?() }; return }
+            do {
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: nil)
+                guard let data = optimized.jpegData(compressionQuality: 0.84) else {
+                    DispatchQueue.main.async { completion?() }
+                    return
+                }
+                try data.write(to: targetURL, options: [.atomic])
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { completion?(); return }
+                    guard self.currentAccountId == accountId else {
+                        try? FileManager.default.removeItem(at: targetURL)
+                        completion?()
+                        return
+                    }
+                    var custom = self.cachedCustomizations
+                    var style = custom.profileCardStyle ?? BiogramProfileCardStyle()
+                    style.imageFilename = filename
+                    custom.profileCardStyle = style
+                    self.cachedCustomizations = custom
+                    self.cachedProfileCardImage = optimized
+                    self.notifyStateChanged()
+                    self.storage.setCustomizations(custom) { [weak self] in
+                        guard let self else { DispatchQueue.main.async { completion?() }; return }
+                        if let oldFilename, oldFilename != filename {
+                            self.bannerIOQueue.async {
+                                try? FileManager.default.removeItem(at: Self.profileCardsDirectory().appendingPathComponent(oldFilename))
+                            }
+                        }
+                        DispatchQueue.main.async { completion?() }
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async { completion?() }
+            }
+        }
+    }
+
 
     public func setLocalPremiumEnabled(
         _ enabled: Bool,
@@ -755,6 +861,14 @@ public final class BiogramManager {
             attributes: nil
         )
 
+        return directory
+    }
+
+    private static func profileCardsDirectory() -> URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSTemporaryDirectory())
+        let directory = base.appendingPathComponent("Biogram/profile-cards", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: nil)
         return directory
     }
 }
