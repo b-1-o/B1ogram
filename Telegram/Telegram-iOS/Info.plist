@@ -213,6 +213,7 @@
 			<array>
 				<string>tg</string>
 				<string>$(APP_SPECIFIC_URL_SCHEME)</string>
+				<string>biogram</string>
 			</array>
 		</dict>
 		<dict>

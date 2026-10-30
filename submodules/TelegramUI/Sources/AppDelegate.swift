@@ -1,5 +1,6 @@
 // MARK: Swiftgram
 import StoreKit
+import Biogram
 import SGIAP
 import SGAPI
 import SGDeviceToken
@@ -1423,7 +1424,17 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
                         authorizeNotifications = false
                     }
                     self.registerForNotifications(context: context.context, authorize: authorizeNotifications)
-                    
+
+                    // Biogram cloud profile enrollment follows the normal Telegram sign-in.
+                    let biogramAccountKey = String(context.context.account.peerId.toInt64())
+                    let biogramTelegramId = String(context.context.account.peerId.id._internalGetInt64Value())
+                    BiogramManager.shared.ensureAccountLoaded(accountId: biogramAccountKey) {
+                        BiogramCloudService.shared.bootstrap(
+                            telegramId: biogramTelegramId,
+                            accountId: biogramAccountKey
+                        )
+                    }
+
                     self.resetIntentsIfNeeded(context: context.context)
                     
                     // MARK: Swiftgram
@@ -2603,6 +2614,15 @@ private func extractAccountManagerState(records: AccountRecordsView<TelegramAcco
             }
         }
         |> deliverOnMainQueue).start(next: { sharedContext, context, authContext in
+            if url.scheme?.lowercased() == "biogram",
+               url.host?.lowercased() == "oauth",
+               let state = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "state" })?.value,
+               let context = context {
+                let accountKey = String(context.context.account.peerId.toInt64())
+                BiogramCloudService.shared.completeAuthorization(state: state, accountId: accountKey)
+                return
+            }
+
             let url = sgActionRequestHandlerSanitizer(url)
             if let authContext = authContext, let confirmationCode = parseConfirmationCodeUrl(sharedContext: sharedContext, url: url) {
                 authContext.rootController.applyConfirmationCode(confirmationCode)
