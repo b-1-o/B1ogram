@@ -7,12 +7,6 @@
 
   <img src="docs/IMG_0125.jpeg" alt="Biogram — project banner" width="100%" />
 
-  <br />
-
-  <img src="docs/IMG_0126.jpeg" alt="Biogram app icon" width="112" />
-
-  <h1>Biogram</h1>
-
   <p><strong>Your Telegram experience, with a more personal identity.</strong></p>
 
   <p>
