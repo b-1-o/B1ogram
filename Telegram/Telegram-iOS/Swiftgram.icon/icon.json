@@ -37,9 +37,9 @@
               "value" : "none"
             }
           ],
-          "glass" : true,
-          "image-name" : "Default@3x 2.svg",
-          "name" : "Default@3x 2",
+          "glass" : false,
+          "image-name" : "Biogram.png",
+          "name" : "Biogram",
           "opacity-specializations" : [
             {
               "value" : 1
