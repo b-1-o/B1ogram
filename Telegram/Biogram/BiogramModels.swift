@@ -38,14 +38,14 @@ public struct BiogramVirtualNumber: Codable, Equatable {
     public var number: String
     public var createdAt: Date
     /// Public virtual numbers are synchronized only when the owner enables this flag.
-    public var isPublic: Bool
+    public var isPublic: Bool?
 
     public init(
         id: String = UUID().uuidString,
         label: String? = nil,
         number: String,
         createdAt: Date = Date(),
-        isPublic: Bool = false
+        isPublic: Bool? = nil
     ) {
         self.id = id
         self.label = label
@@ -202,10 +202,6 @@ public struct BiogramBanner: Codable, Equatable {
     }
 }
 
-
-public struct BiogramCloudProfileEnvelopeModel: Codable {
-    public let profile: BiogramCloudPublicProfile
-}
 
 public struct BiogramCloudPublicProfile: Codable, Equatable {
     public let telegramId: String
