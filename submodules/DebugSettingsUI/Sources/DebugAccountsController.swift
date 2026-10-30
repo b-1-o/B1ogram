@@ -7,7 +7,6 @@ import TelegramPresentationData
 import ItemListUI
 import PresentationDataUtils
 import AccountContext
-import Biogram
 
 private final class DebugAccountsControllerArguments {
     let context: AccountContext
@@ -111,9 +110,6 @@ public func debugAccountsController(context: AccountContext, accountManager: Acc
         transaction.setCurrentId(id)
     }).start()
     
-    // Biogram: переключаем настройки под новый аккаунт
-    let accountIdString = String(id.int64)
-    BiogramManager.shared.switchToAccount(accountId: accountIdString)
 }, loginNewAccount: {
         let presentationData = context.sharedContext.currentPresentationData.with { $0 }
         let controller = ActionSheetController(presentationData: presentationData)
