@@ -186,6 +186,10 @@ public final class BiogramManager {
             name: .biogramStateDidChange,
             object: self
         )
+
+        if !self.isApplyingCloudProfile, self.isLoaded {
+            BiogramCloudService.shared.scheduleLocalProfileSync(accountId: self.currentAccountId)
+        }
     }
 
     // MARK: - Read accessors
@@ -248,6 +252,94 @@ public final class BiogramManager {
 
     public func profileCardImage() -> UIImage? {
         return self.cachedProfileCardImage
+    }
+
+
+    public func cloudProfilePayload() -> BiogramCloudProfilePayload {
+        let publicNumbers = self.cachedVirtualNumbers.compactMap { item -> BiogramCloudPublicNumber? in
+            guard item.isPublic == true else { return nil }
+            return BiogramCloudPublicNumber(
+                id: item.id,
+                label: item.label,
+                number: item.number,
+                isPublic: true
+            )
+        }
+        return BiogramCloudProfilePayload(
+            profileColorEnabled: self.cachedCustomizations.profileColorEnabled,
+            profileColor: self.cachedCustomizations.profileColor,
+            cardStyle: self.profileCardStyle,
+            aliases: self.cachedAliases,
+            publicNumbers: publicNumbers,
+            publicEnabled: true
+        )
+    }
+
+    public func setVirtualNumberPublic(
+        id: String,
+        isPublic: Bool,
+        completion: (() -> Void)? = nil
+    ) {
+        guard let index = self.cachedVirtualNumbers.firstIndex(where: { $0.id == id }) else {
+            completion?()
+            return
+        }
+        self.cachedVirtualNumbers[index].isPublic = isPublic
+        self.notifyStateChanged()
+        self.storage.replaceVirtualNumbers(self.cachedVirtualNumbers, completion: completion)
+    }
+
+    public func applyCloudProfile(
+        _ profile: BiogramCloudPublicProfile,
+        accountId: String,
+        completion: (() -> Void)? = nil
+    ) {
+        guard self.currentAccountId == accountId, self.isLoaded else {
+            completion?()
+            return
+        }
+
+        self.isApplyingCloudProfile = true
+
+        var customizations = self.cachedCustomizations
+        customizations.profileColorEnabled = profile.profileColorEnabled
+        customizations.profileColor = profile.profileColor
+        customizations.profileCardStyle = BiogramProfileCardStyle(
+            paletteName: profile.cardStyle.paletteName,
+            material: profile.cardStyle.material,
+            imageFilename: self.cachedCustomizations.profileCardStyle?.imageFilename
+        )
+        self.cachedCustomizations = customizations
+        self.cachedAliases = profile.aliases
+
+        let existingPrivateNumbers = self.cachedVirtualNumbers.filter { $0.isPublic != true }
+        let serverPublicNumbers = profile.publicNumbers.map {
+            BiogramVirtualNumber(
+                id: $0.id,
+                label: $0.label,
+                number: $0.number,
+                isPublic: true
+            )
+        }
+        self.cachedVirtualNumbers = existingPrivateNumbers + serverPublicNumbers
+
+        self.storage.setCustomizations(customizations)
+        self.storage.replaceAliases(profile.aliases)
+        self.storage.replaceVirtualNumbers(self.cachedVirtualNumbers)
+
+        NotificationCenter.default.post(name: .biogramStateDidChange, object: self)
+
+        guard let image = profile.cardImage else {
+            self.isApplyingCloudProfile = false
+            completion?()
+            return
+        }
+
+        self.setProfileCardImage(image) { [weak self] in
+            guard let self else { completion?(); return }
+            self.isApplyingCloudProfile = false
+            completion?()
+        }
     }
 
     // MARK: - Mutations

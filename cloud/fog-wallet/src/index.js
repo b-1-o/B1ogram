@@ -197,7 +197,7 @@ async function finishTelegramLogin(request, env) {
     await env.DB.prepare(
       "UPDATE telegram_oauth_flows SET status = 'failed', error_code = ? WHERE state_hash = ? AND status = 'pending'"
     ).bind(String(oauthError).slice(0, 64), stateHash).run();
-    return redirectToApp(null, "authorization_cancelled");
+    return redirectToApp(state, "authorization_cancelled");
   }
   if (!code) {
     await env.DB.prepare(
@@ -255,7 +255,7 @@ async function finishTelegramLogin(request, env) {
     await env.DB.prepare(
       "UPDATE telegram_oauth_flows SET status = 'failed', error_code = ? WHERE state_hash = ? AND status = 'pending'"
     ).bind(codeValue, stateHash).run().catch(() => {});
-    return redirectToApp(null, codeValue);
+    return redirectToApp(state, codeValue);
   }
 }
 

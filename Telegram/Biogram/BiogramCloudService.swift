@@ -205,7 +205,11 @@ public final class BiogramCloudService {
             case "completed":
                 _ = self.writeSecureValue(Data(flow.flowId.utf8), accountId: accountId, key: "session")
                 self.setPendingFlow(nil, accountId: accountId)
-                self.loadMyProfile(accountId: accountId, token: flow.flowId)
+                if status.isNewUser == true {
+                    self.syncLocalProfile(accountId: accountId)
+                } else {
+                    self.loadMyProfile(accountId: accountId, token: flow.flowId)
+                }
             case "failed":
                 self.setPendingFlow(nil, accountId: accountId)
             default:
