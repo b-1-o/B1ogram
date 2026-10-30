@@ -5,8 +5,6 @@
 
 <div align="center">
 
-  <img src="docs/IMG_0125.jpeg" alt="Biogram app screenshot" width="220" />
-
   <h1>Biogram</h1>
 
   <p><strong>Your Telegram experience, with a more personal identity.</strong></p>
@@ -33,10 +31,6 @@
 **Biogram** is an iOS messaging client project built on a Telegram-derived codebase. It combines the underlying messaging application with a separate Biogram layer for personal profile presentation and account-level customization.
 
 The goal is to make a profile feel more individual without turning the app into a collection of unrelated features. Biogram-specific settings are organized in one place, while the core messaging experience remains based on the upstream application.
-
-<div align="center">
-  <img src="docs/IMG_0126.jpeg" alt="Biogram interface screenshot" width="220" />
-</div>
 
 ## What makes Biogram different
 
@@ -68,13 +62,20 @@ Some editor functionality is controlled by development/debug configuration. Avai
 
 ## Screenshots
 
-The screenshots below are stored in the repository so they remain available when the project is cloned or viewed on GitHub.
+A closer look at Biogram across six screens. The gallery is arranged in **two rows of three**; every image keeps its original aspect ratio and scales to the available column width without cropping or stretching.
 
-<div align="center">
-  <img src="docs/IMG_0125.jpeg" alt="Biogram screenshot — first view" width="260" />
-  &nbsp;&nbsp;
-  <img src="docs/IMG_0126.jpeg" alt="Biogram screenshot — second view" width="260" />
-</div>
+<table>
+  <tr>
+    <td width="33.33%" align="center"><img src="docs/IMG_0129.jpeg" alt="Biogram screenshot 1" width="100%" /></td>
+    <td width="33.33%" align="center"><img src="docs/IMG_0130.jpeg" alt="Biogram screenshot 2" width="100%" /></td>
+    <td width="33.33%" align="center"><img src="docs/IMG_0131.jpeg" alt="Biogram screenshot 3" width="100%" /></td>
+  </tr>
+  <tr>
+    <td width="33.33%" align="center"><img src="docs/IMG_0132.jpeg" alt="Biogram screenshot 4" width="100%" /></td>
+    <td width="33.33%" align="center"><img src="docs/IMG_0133.jpeg" alt="Biogram screenshot 5" width="100%" /></td>
+    <td width="33.33%" align="center"><img src="docs/IMG_0134.jpeg" alt="Biogram screenshot 6" width="100%" /></td>
+  </tr>
+</table>
 
 ## Project status and data behavior
 
