@@ -39,6 +39,7 @@ public final class BiogramCloudService {
     private var publicProfileFetchedAt: [String: Date] = [:]
     private var loadingProfiles: Set<String> = []
     private var attemptedBootstrapAccounts: Set<String> = []
+    private var bootstrapRetryAttempts: [String: Int] = [:]
     private var pendingSyncWorkItems: [String: DispatchWorkItem] = [:]
 
     private init() {}
@@ -135,6 +136,75 @@ public final class BiogramCloudService {
         }.resume()
     }
 
+    private func releaseBootstrapAttempt(accountId: String, resetRetryCount: Bool = false) {
+        self.lock.lock()
+        self.attemptedBootstrapAccounts.remove(accountId)
+        if resetRetryCount {
+            self.bootstrapRetryAttempts.removeValue(forKey: accountId)
+        }
+        self.lock.unlock()
+    }
+
+    /// Retries transient failures without opening multiple Telegram authorization flows.
+    private func scheduleBootstrapRetry(telegramId: String, accountId: String, statusCode: Int) {
+        let isTransient = statusCode == 0 || statusCode == 408 || statusCode == 425
+            || statusCode == 429 || statusCode >= 500
+        let delays: [TimeInterval] = [2.0, 5.0, 12.0, 30.0]
+
+        self.lock.lock()
+        guard isTransient else {
+            self.attemptedBootstrapAccounts.remove(accountId)
+            self.bootstrapRetryAttempts.removeValue(forKey: accountId)
+            self.lock.unlock()
+            return
+        }
+        let attempt = self.bootstrapRetryAttempts[accountId] ?? 0
+        guard attempt < delays.count else {
+            self.attemptedBootstrapAccounts.remove(accountId)
+            self.bootstrapRetryAttempts.removeValue(forKey: accountId)
+            self.lock.unlock()
+            return
+        }
+        self.bootstrapRetryAttempts[accountId] = attempt + 1
+        self.lock.unlock()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + delays[attempt]) { [weak self] in
+            guard let self else { return }
+            self.lock.lock()
+            self.attemptedBootstrapAccounts.remove(accountId)
+            self.lock.unlock()
+            self.bootstrap(telegramId: telegramId, accountId: accountId)
+        }
+    }
+
+    private func retryPendingFlowCheck(
+        _ flow: BiogramCloudPendingFlow,
+        accountId: String,
+        reopenAuthorization: Bool,
+        attempt: Int
+    ) {
+        let delays: [TimeInterval] = [0.75, 1.5, 2.5]
+        if attempt < delays.count {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delays[attempt]) { [weak self] in
+                self?.checkPendingFlow(
+                    flow,
+                    accountId: accountId,
+                    reopenAuthorization: reopenAuthorization,
+                    attempt: attempt + 1
+                )
+            }
+            return
+        }
+
+        if reopenAuthorization, let authorizationUrl = URL(string: flow.authorizationUrl) {
+            DispatchQueue.main.async {
+                UIApplication.shared.open(authorizationUrl, options: [:], completionHandler: nil)
+            }
+        } else {
+            self.releaseBootstrapAttempt(accountId: accountId)
+        }
+    }
+
     // MARK: - Automatic enrollment
 
     /// Called after the normal Telegram account has become ready.
@@ -162,17 +232,30 @@ public final class BiogramCloudService {
         }
 
         let body = try? JSONSerialization.data(withJSONObject: ["telegramId": telegramId])
-        guard let body else { return }
+        guard let body else {
+            self.releaseBootstrapAttempt(accountId: accountId, resetRetryCount: true)
+            return
+        }
         let request = self.makeRequest(path: "v1/auth/telegram/start", method: "POST", body: body)
         self.send(request) { [weak self] data, response, error in
-            guard let self, error == nil, response?.statusCode == 201,
+            guard let self else { return }
+            guard error == nil, response?.statusCode == 201,
                   let data,
                   let start = try? JSONDecoder().decode(BiogramCloudStartResponse.self, from: data),
                   let authorizationUrl = URL(string: start.authorizationUrl),
                   authorizationUrl.scheme == "https",
                   authorizationUrl.host == "oauth.telegram.org" else {
+                self.scheduleBootstrapRetry(
+                    telegramId: telegramId,
+                    accountId: accountId,
+                    statusCode: response?.statusCode ?? 0
+                )
                 return
             }
+
+            self.lock.lock()
+            self.bootstrapRetryAttempts.removeValue(forKey: accountId)
+            self.lock.unlock()
 
             let pending = BiogramCloudPendingFlow(
                 flowId: start.flowId,
@@ -189,7 +272,8 @@ public final class BiogramCloudService {
     private func checkPendingFlow(
         _ flow: BiogramCloudPendingFlow,
         accountId: String,
-        reopenAuthorization: Bool
+        reopenAuthorization: Bool,
+        attempt: Int = 0
     ) {
         var components = URLComponents(url: Self.apiBaseURL.appendingPathComponent("v1/auth/telegram/status"), resolvingAgainstBaseURL: false)
         components?.queryItems = [URLQueryItem(name: "state", value: flow.state)]
@@ -198,13 +282,26 @@ public final class BiogramCloudService {
         request.httpMethod = "GET"
         request.timeoutInterval = 15
         self.send(request) { [weak self] data, response, error in
-            guard let self, error == nil, let data,
+            guard let self else { return }
+            if response?.statusCode == 404 {
+                self.setPendingFlow(nil, accountId: accountId)
+                self.releaseBootstrapAttempt(accountId: accountId, resetRetryCount: true)
+                return
+            }
+            guard error == nil, let data,
                   let status = try? JSONDecoder().decode(BiogramCloudStatusResponse.self, from: data) else {
+                self.retryPendingFlowCheck(
+                    flow,
+                    accountId: accountId,
+                    reopenAuthorization: reopenAuthorization,
+                    attempt: attempt
+                )
                 return
             }
 
             switch status.status {
             case "completed":
+                self.releaseBootstrapAttempt(accountId: accountId, resetRetryCount: true)
                 _ = self.writeSecureValue(Data(flow.flowId.utf8), accountId: accountId, key: "session")
                 self.setPendingFlow(nil, accountId: accountId)
                 let preserveLocalProfile = status.isNewUser == true
@@ -217,9 +314,7 @@ public final class BiogramCloudService {
                 }
             case "failed":
                 self.setPendingFlow(nil, accountId: accountId)
-                self.lock.lock()
-                self.attemptedBootstrapAccounts.remove(accountId)
-                self.lock.unlock()
+                self.releaseBootstrapAttempt(accountId: accountId, resetRetryCount: true)
             default:
                 if reopenAuthorization,
                    response?.statusCode == 202,
@@ -227,6 +322,13 @@ public final class BiogramCloudService {
                     DispatchQueue.main.async {
                         UIApplication.shared.open(url, options: [:], completionHandler: nil)
                     }
+                } else {
+                    self.retryPendingFlowCheck(
+                        flow,
+                        accountId: accountId,
+                        reopenAuthorization: reopenAuthorization,
+                        attempt: attempt
+                    )
                 }
             }
         }
