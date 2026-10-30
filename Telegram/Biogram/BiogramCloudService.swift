@@ -36,6 +36,7 @@ public final class BiogramCloudService {
     private let keychainService = "org.biogram.cloud-profiles"
     private let lock = NSLock()
     private var publicProfiles: [String: BiogramCloudPublicProfile] = [:]
+    private var publicProfileFetchedAt: [String: Date] = [:]
     private var loadingProfiles: Set<String> = []
     private var attemptedBootstrapAccounts: Set<String> = []
     private var pendingSyncWorkItems: [String: DispatchWorkItem] = [:]
@@ -140,6 +141,7 @@ public final class BiogramCloudService {
     /// The first enrollment uses Telegram's own OIDC confirmation, without a separate Biogram settings action.
     public func bootstrap(telegramId: String, accountId: String) {
         guard !telegramId.isEmpty else { return }
+        _ = self.writeSecureValue(Data(telegramId.utf8), accountId: accountId, key: "telegram-id")
 
         if let token = self.bearerToken(accountId: accountId) {
             self.loadMyProfile(accountId: accountId, token: token)
@@ -212,6 +214,9 @@ public final class BiogramCloudService {
                 }
             case "failed":
                 self.setPendingFlow(nil, accountId: accountId)
+                self.lock.lock()
+                self.attemptedBootstrapAccounts.remove(accountId)
+                self.lock.unlock()
             default:
                 if reopenAuthorization,
                    response?.statusCode == 202,
@@ -252,7 +257,12 @@ public final class BiogramCloudService {
         guard let body = try? JSONEncoder().encode(payload) else { return }
         let request = self.makeRequest(path: "v1/profile/me", method: "PUT", body: body, token: token)
         self.send(request) { [weak self] _, response, error in
-            guard let self, error == nil, response?.statusCode == 200 else { return }
+            guard let self else { return }
+            if response?.statusCode == 401 {
+                self.restartEnrollment(accountId: accountId)
+                return
+            }
+            guard error == nil, response?.statusCode == 200 else { return }
             self.syncCardArtwork(accountId: accountId, token: token)
         }
     }
@@ -309,7 +319,12 @@ public final class BiogramCloudService {
     private func loadMyProfile(accountId: String, token: String) {
         let request = self.makeRequest(path: "v1/profile/me", token: token)
         self.send(request) { [weak self] data, response, error in
-            guard let self, error == nil, response?.statusCode == 200,
+            guard let self else { return }
+            if response?.statusCode == 401 {
+                self.restartEnrollment(accountId: accountId)
+                return
+            }
+            guard error == nil, response?.statusCode == 200,
                   let data,
                   let envelope = try? JSONDecoder().decode(BiogramCloudProfileEnvelope.self, from: data) else {
                 return
@@ -319,6 +334,21 @@ public final class BiogramCloudService {
                 self.cache(profile: envelope.profile)
             }
         }
+    }
+
+    /// A revoked or expired 30-day session is re-established using the saved Telegram identity.
+    private func restartEnrollment(accountId: String) {
+        guard let identityData = self.readSecureValue(accountId: accountId, key: "telegram-id"),
+              let telegramId = String(data: identityData, encoding: .utf8),
+              !telegramId.isEmpty else {
+            _ = self.writeSecureValue(nil, accountId: accountId, key: "session")
+            return
+        }
+        _ = self.writeSecureValue(nil, accountId: accountId, key: "session")
+        self.lock.lock()
+        self.attemptedBootstrapAccounts.remove(accountId)
+        self.lock.unlock()
+        self.bootstrap(telegramId: telegramId, accountId: accountId)
     }
 
     public func cachedPublicProfile(for telegramId: String) -> BiogramCloudPublicProfile? {
@@ -331,6 +361,7 @@ public final class BiogramCloudService {
     private func cache(profile: BiogramCloudPublicProfile) {
         self.lock.lock()
         self.publicProfiles[profile.telegramId] = profile
+        self.publicProfileFetchedAt[profile.telegramId] = Date()
         self.lock.unlock()
     }
 
@@ -338,15 +369,18 @@ public final class BiogramCloudService {
         for telegramId: String,
         completion: @escaping (BiogramCloudPublicProfile?) -> Void
     ) {
-        if let cached = self.cachedPublicProfile(for: telegramId) {
-            completion(cached)
+        self.lock.lock()
+        let cached = self.publicProfiles[telegramId]
+        let fetchedAt = self.publicProfileFetchedAt[telegramId]
+        let cacheIsFresh = cached != nil && fetchedAt.map { Date().timeIntervalSince($0) < 60 } == true
+        if cacheIsFresh {
+            self.lock.unlock()
+            DispatchQueue.main.async { completion(cached) }
             return
         }
-
-        self.lock.lock()
         if self.loadingProfiles.contains(telegramId) {
             self.lock.unlock()
-            completion(nil)
+            DispatchQueue.main.async { completion(cached) }
             return
         }
         self.loadingProfiles.insert(telegramId)
@@ -363,11 +397,20 @@ public final class BiogramCloudService {
             guard error == nil, response?.statusCode == 200,
                   let data,
                   let envelope = try? JSONDecoder().decode(BiogramCloudProfileEnvelope.self, from: data) else {
-                DispatchQueue.main.async { completion(nil) }
+                if response?.statusCode == 404 {
+                    self.lock.lock()
+                    self.publicProfiles.removeValue(forKey: telegramId)
+                    self.publicProfileFetchedAt.removeValue(forKey: telegramId)
+                    self.lock.unlock()
+                    DispatchQueue.main.async { completion(nil) }
+                } else {
+                    DispatchQueue.main.async { completion(cached) }
+                }
                 return
             }
             self.cache(profile: envelope.profile)
             DispatchQueue.main.async { completion(envelope.profile) }
         }
     }
+
 }
