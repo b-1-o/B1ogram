@@ -82,9 +82,9 @@ async function readJson(request, maxBytes = 512 * 1024) {
   }
 }
 
-function redirectToApp(flowId, error) {
+function redirectToApp(state, error) {
   const url = new URL(APP_RETURN_URL);
-  if (flowId) url.searchParams.set("flow", flowId);
+  if (state) url.searchParams.set("state", state);
   if (error) url.searchParams.set("error", error);
   return Response.redirect(url.toString(), 302);
 }
