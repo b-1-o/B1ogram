@@ -249,7 +249,7 @@ async function finishTelegramLogin(request, env) {
       "UPDATE telegram_oauth_flows SET status = 'completed', user_id = ?, is_new_user = ?, error_code = NULL WHERE state_hash = ? AND status = 'pending'"
     ).bind(userId, isNewUser ? 1 : 0, stateHash).run();
 
-    return redirectToApp(url.searchParams.get("flow") || null, null);
+    return redirectToApp(state, null);
   } catch (error) {
     const codeValue = String(error?.message || "telegram_authorization_failed").slice(0, 96);
     await env.DB.prepare(
@@ -292,29 +292,29 @@ async function createTelegramFlow(request, env) {
   authUrl.searchParams.set("code_challenge", challenge);
   authUrl.searchParams.set("code_challenge_method", "S256");
 
-  return json({ flowId, authorizationUrl: authUrl.toString(), expiresIn: FLOW_SECONDS }, 201);
+  return json({ flowId, state, authorizationUrl: authUrl.toString(), expiresIn: FLOW_SECONDS }, 201);
 }
 
 async function pollTelegramFlow(request, env) {
   const url = new URL(request.url);
-  const flowId = url.searchParams.get("flow") || "";
-  if (!/^[A-Za-z0-9_-]{32,96}$/.test(flowId)) return fail("invalid_flow", 400);
-  const flowHash = await sha256(flowId);
+  const state = url.searchParams.get("state") || "";
+  if (!/^[A-Za-z0-9_-]{32,96}$/.test(state)) return fail("invalid_flow_state", 400);
+  const stateHash = await sha256(state);
   const row = await env.DB.prepare(
-    "SELECT status, expires_at, error_code, is_new_user FROM telegram_oauth_flows WHERE flow_id_hash = ? LIMIT 1"
-  ).bind(flowHash).first();
+    "SELECT status, expires_at, error_code, is_new_user FROM telegram_oauth_flows WHERE state_hash = ? LIMIT 1"
+  ).bind(stateHash).first();
+
   if (!row) return fail("flow_not_found", 404);
   if (row.status === "pending" && row.expires_at <= nowSeconds()) {
     await env.DB.prepare(
-      "UPDATE telegram_oauth_flows SET status = 'failed', error_code = 'flow_expired' WHERE flow_id_hash = ? AND status = 'pending'"
-    ).bind(flowHash).run();
+      "UPDATE telegram_oauth_flows SET status = 'failed', error_code = 'flow_expired' WHERE state_hash = ? AND status = 'pending'"
+    ).bind(stateHash).run();
     return json({ status: "failed", error: "flow_expired" });
   }
   if (row.status === "failed") return json({ status: "failed", error: row.error_code || "authorization_failed" });
   if (row.status === "completed") return json({ status: "completed", isNewUser: row.is_new_user === 1 });
   return json({ status: "pending" }, 202);
 }
-
 function bearerToken(request) {
   const header = request.headers.get("Authorization") || "";
   const match = header.match(/^Bearer\s+([A-Za-z0-9_-]{32,96})$/i);
