@@ -381,7 +381,7 @@ private enum BiogramEntry: ItemListNodeEntry {
             let imageLabel = hasImage ? "Custom artwork" : "Color material"
             return ItemListDisclosureItem(presentationData: presentationData, title: "Customize 3D card", label: "\(style.paletteName) · \(style.material.capitalized) · \(imageLabel)", sectionId: self.section, style: .blocks, action: { arguments.openProfileCard() })
         case .info:
-            return ItemListTextItem(presentationData: presentationData, text: .plain("Profile color uses Telegram's profile-color system so other users can see it. Your custom card artwork and material are saved on this device. Tap the card to flip it; drag to tilt it in 3D."), sectionId: self.section)
+            return ItemListTextItem(presentationData: presentationData, text: .plain("Profile color uses Telegram's profile-color system. Biogram aliases, card material and artwork synchronize with other Biogram users. Virtual numbers stay private unless you explicitly publish each one. Tap the card to flip it; drag to tilt it in 3D."), sectionId: self.section)
         }
     }
 }
@@ -1374,7 +1374,7 @@ private final class BiogramProfileCardDesignerController: ViewController {
     }
 
     private func addFooter() {
-        self.contentStack.addArrangedSubview(self.label("The ID and profile signature are decorative identity details, not a payment credential. Your chosen artwork and material are saved locally on this device.", size: 11, color: UIColor.white.withAlphaComponent(0.43), lines: 0))
+        self.contentStack.addArrangedSubview(self.label("The member serial and profile signature are decorative identity details, not credentials. Your card artwork and material synchronize with your Biogram profile.", size: 11, color: UIColor.white.withAlphaComponent(0.43), lines: 0))
     }
 
     private func chooseArtwork() {

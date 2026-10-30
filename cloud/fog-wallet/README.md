@@ -15,7 +15,7 @@ Register these values in @BotFather → Login Widget → Allowed URLs:
 - \`https://fog-wallet-api.collab-docs-b1o.workers.dev\`
 - \`https://fog-wallet-api.collab-docs-b1o.workers.dev/v1/auth/telegram/callback\`
 
-Configure the Worker secret \`TELEGRAM_CLIENT_SECRET\`. The client ID is \`9254075951\`.
+Configure the Worker secret \`TELEGRAM_CLIENT_SECRET\`. The client ID is \`9254075951\`. A user performs this one-time Telegram identity confirmation the first time Biogram registers the signed-in account; there is no separate Fog Wallet Connect screen.
 
 ## Public profile data
 
@@ -25,7 +25,7 @@ The public profile contains verified display name and username, Biogram aliases,
 
 - \`POST /v1/auth/telegram/start\`
 - \`GET /v1/auth/telegram/callback\`
-- \`GET /v1/auth/telegram/status?flow=<flowId>\`
+- \`GET /v1/auth/telegram/status?state=<state>\`
 - \`GET /v1/profile/me\`
 - \`PUT /v1/profile/me\`
 - \`PUT /v1/profile/me/card-image\`

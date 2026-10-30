@@ -257,6 +257,35 @@ public final class BiogramCloudService {
         }
     }
 
+    private static func encodedCardImage(_ image: UIImage, maximumBytes: Int) -> Data? {
+        guard image.size.width > 0, image.size.height > 0 else { return nil }
+
+        let longestSide = max(image.size.width, image.size.height)
+        var scale = min(1.0, 1280.0 / longestSide)
+        let qualities: [CGFloat] = [0.78, 0.70, 0.62, 0.54]
+
+        for _ in 0..<5 {
+            let targetSize = CGSize(
+                width: max(1, floor(image.size.width * scale)),
+                height: max(1, floor(image.size.height * scale))
+            )
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1.0
+            format.opaque = true
+            let resized = UIGraphicsImageRenderer(size: targetSize, format: format).image { _ in
+                image.draw(in: CGRect(origin: .zero, size: targetSize))
+            }
+
+            for quality in qualities {
+                if let data = resized.jpegData(compressionQuality: quality), data.count <= maximumBytes {
+                    return data
+                }
+            }
+            scale *= 0.78
+        }
+        return nil
+    }
+
     private func syncCardArtwork(accountId: String, token: String) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -269,8 +298,7 @@ public final class BiogramCloudService {
                 return
             }
 
-            let optimized = image.jpegData(compressionQuality: 0.76)
-            guard let data = optimized, data.count <= 327680 else { return }
+            guard let data = Self.encodedCardImage(image, maximumBytes: 327680) else { return }
             let body = try? JSONEncoder().encode(BiogramCloudImagePayload(imageBase64: data.base64EncodedString()))
             guard let body else { return }
             let request = self.makeRequest(path: path, method: "PUT", body: body, token: token)
