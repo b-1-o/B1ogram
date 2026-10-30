@@ -258,21 +258,24 @@ public final class BiogramCloudService {
     }
 
     private func syncCardArtwork(accountId: String, token: String) {
-        let image = BiogramManager.shared.profileCardImage()
-        let path = "v1/profile/me/card-image"
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let image = BiogramManager.shared.profileCardImage()
+            let path = "v1/profile/me/card-image"
 
-        guard let image else {
-            let request = self.makeRequest(path: path, method: "DELETE", token: token)
+            guard let image else {
+                let request = self.makeRequest(path: path, method: "DELETE", token: token)
+                self.send(request) { _, _, _ in }
+                return
+            }
+
+            let optimized = image.jpegData(compressionQuality: 0.76)
+            guard let data = optimized, data.count <= 327680 else { return }
+            let body = try? JSONEncoder().encode(BiogramCloudImagePayload(imageBase64: data.base64EncodedString()))
+            guard let body else { return }
+            let request = self.makeRequest(path: path, method: "PUT", body: body, token: token)
             self.send(request) { _, _, _ in }
-            return
         }
-
-        let optimized = image.jpegData(compressionQuality: 0.76)
-        guard let data = optimized, data.count <= 327680 else { return }
-        let body = try? JSONEncoder().encode(BiogramCloudImagePayload(imageBase64: data.base64EncodedString()))
-        guard let body else { return }
-        let request = self.makeRequest(path: path, method: "PUT", body: body, token: token)
-        self.send(request) { _, _, _ in }
     }
 
     private func loadMyProfile(accountId: String, token: String) {

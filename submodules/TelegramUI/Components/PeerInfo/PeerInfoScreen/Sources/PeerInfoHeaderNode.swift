@@ -581,9 +581,13 @@ final class PeerInfoHeaderNode: ASDisplayNode {
             hasBackground = true
 } else if let peer {
             // Biogram: свой цвет профиля → градиент
+            let remoteBiogramProfile = BiogramCloudService.shared.cachedPublicProfile(
+                for: String(peer.id.id._internalGetInt64Value())
+            )
             if self.isMyProfile,
                BiogramManager.shared.profileColorEnabled,
                let bc = BiogramManager.shared.profileColor {
+
                 
                 let brightness = CGFloat(max(0.3, min(1.2, bc.brightness)))
                 let mainColor = UIColor(
@@ -594,6 +598,19 @@ final class PeerInfoHeaderNode: ASDisplayNode {
                 )
                 let secondaryColor = mainColor.withMultiplied(hue: 1.0, saturation: 1.15, brightness: 0.75)
                 
+                backgroundCoverSubject = .custom(mainColor, secondaryColor, nil, nil)
+                hasBackground = true
+            } else if let remoteBiogramProfile,
+                      remoteBiogramProfile.profileColorEnabled,
+                      let bc = remoteBiogramProfile.profileColor {
+                let brightness = CGFloat(max(0.3, min(1.2, bc.brightness)))
+                let mainColor = UIColor(
+                    red: min(1.0, CGFloat(bc.r) * brightness),
+                    green: min(1.0, CGFloat(bc.g) * brightness),
+                    blue: min(1.0, CGFloat(bc.b) * brightness),
+                    alpha: 1.0
+                )
+                let secondaryColor = mainColor.withMultiplied(hue: 1.0, saturation: 1.15, brightness: 0.75)
                 backgroundCoverSubject = .custom(mainColor, secondaryColor, nil, nil)
                 hasBackground = true
             } else {
@@ -711,6 +728,24 @@ final class PeerInfoHeaderNode: ASDisplayNode {
             regularContentButtonBackgroundColor = baseButtonBackgroundColor.blendOver(background: secondaryColor.mixedWith(mainColor, alpha: 0.1))
             regularHeaderButtonBackgroundColor = baseButtonBackgroundColor.blendOver(background: secondaryColor.mixedWith(mainColor, alpha: 0.1))
             
+            hasCoverColor = true
+        } else if let peer,
+                  let remoteBiogramProfile = BiogramCloudService.shared.cachedPublicProfile(for: String(peer.id.id._internalGetInt64Value())),
+                  remoteBiogramProfile.profileColorEnabled,
+                  let bc = remoteBiogramProfile.profileColor {
+            let brightness = CGFloat(max(0.3, min(1.2, bc.brightness)))
+            let mainColor = UIColor(
+                red: min(1.0, CGFloat(bc.r) * brightness),
+                green: min(1.0, CGFloat(bc.g) * brightness),
+                blue: min(1.0, CGFloat(bc.b) * brightness),
+                alpha: 1.0
+            )
+            regularNavigationContentsSecondaryColor = UIColor(white: 1.0, alpha: 0.6).blitOver(mainColor.withMultiplied(hue: 1.0, saturation: 2.2, brightness: 1.5), alpha: 1.0)
+            let baseButtonBackgroundColor = presentationData.theme.overallDarkAppearance
+                ? UIColor(white: 0.0, alpha: 0.25)
+                : UIColor(white: 1.0, alpha: 0.25)
+            regularContentButtonBackgroundColor = baseButtonBackgroundColor.blendOver(background: mainColor)
+            regularHeaderButtonBackgroundColor = baseButtonBackgroundColor.blendOver(background: mainColor)
             hasCoverColor = true
         } else if self.isMyProfile, BiogramManager.shared.profileColorEnabled, let bc = BiogramManager.shared.profileColor {
             let brightness = CGFloat(max(0.3, min(1.2, bc.brightness)))

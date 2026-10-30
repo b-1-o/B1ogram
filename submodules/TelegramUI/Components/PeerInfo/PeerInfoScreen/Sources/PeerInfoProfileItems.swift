@@ -274,12 +274,10 @@ func infoItems(
             let usernames = user.usernames.filter { $0.isActive && $0.username != mainUsername }
             var allAdditional: [String] = usernames.map { "@\($0.username)" }
             
-            if isMyProfile {
-                let localAliases = BiogramManager.shared.aliases()
-                for alias in localAliases {
-                    if alias != mainUsername && !allAdditional.contains("@\(alias)") {
-                        allAdditional.append("@\(alias)")
-                    }
+            let biogramAliases = isMyProfile ? BiogramManager.shared.aliases() : (cachedBiogramProfile?.aliases ?? [])
+            for alias in biogramAliases {
+                if alias != mainUsername && !allAdditional.contains("@\(alias)") {
+                    allAdditional.append("@\(alias)")
                 }
             }
             
@@ -312,10 +310,10 @@ func infoItems(
                     }
                 )
             )
-        } else if isMyProfile {
-            let localAliases = BiogramManager.shared.aliases()
-            if !localAliases.isEmpty {
-                let text = localAliases.map { "@\($0)" }.joined(separator: ", ")
+        } else {
+            let aliases = isMyProfile ? BiogramManager.shared.aliases() : (cachedBiogramProfile?.aliases ?? [])
+            if !aliases.isEmpty {
+                let text = aliases.map { "@\($0)" }.joined(separator: ", ")
                 items[currentPeerInfoSection]!.append(
                     PeerInfoScreenLabeledValueItem(
                         id: ItemUsername,

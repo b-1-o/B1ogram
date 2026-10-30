@@ -190,7 +190,7 @@ async function finishTelegramLogin(request, env) {
   const stateHash = await sha256(state);
   const flow = await getFlow(env.DB, stateHash);
   if (!flow || flow.status !== "pending" || flow.expires_at <= nowSeconds()) {
-    return redirectToApp(null, "flow_expired");
+    return redirectToApp(state, "flow_expired");
   }
 
   if (oauthError) {
@@ -203,7 +203,7 @@ async function finishTelegramLogin(request, env) {
     await env.DB.prepare(
       "UPDATE telegram_oauth_flows SET status = 'failed', error_code = 'missing_code' WHERE state_hash = ? AND status = 'pending'"
     ).bind(stateHash).run();
-    return redirectToApp(null, "missing_authorization_code");
+    return redirectToApp(state, "missing_authorization_code");
   }
 
   try {

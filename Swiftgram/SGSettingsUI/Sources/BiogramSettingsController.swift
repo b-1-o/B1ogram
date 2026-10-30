@@ -1106,10 +1106,12 @@ private final class Biogram3DProfileCardView: UIView {
         self.brandLabel.text = "BIOGRAM"
         self.nameLabel.text = self.userName
         self.handleLabel.text = self.userHandle.hasPrefix("@") ? self.userHandle : "@\(self.userHandle)"
-        self.frontSignatureLabel.text = biogramCardSignature(userId)
+        let signature = biogramCardSignature(userId)
+        self.frontSignatureLabel.text = signature
         self.backHandleLabel.text = self.handleLabel.text
-        self.backIdLabel.text = "TELEGRAM ID  /  \(userId)"
-        self.backSignatureLabel.text = biogramCardSignature(userId)
+        self.backIdLabel.text = "MEMBER SERIAL  /  \(String(signature.suffix(14)))"
+        self.backCipherLabel.text = "B1O://\(String(signature.prefix(7)).replacingOccurrences(of: " ", with: ""))//PROFILE//\(String(signature.suffix(8)))"
+        self.backSignatureLabel.text = signature
         self.backGradient.colors = [shade.cgColor, biogramCardColor("#111114").cgColor, main.withAlphaComponent(0.40).cgColor]
 
         switch style.material {
