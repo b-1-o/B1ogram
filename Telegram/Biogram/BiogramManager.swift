@@ -7,8 +7,8 @@ public extension Notification.Name {
     static let biogramAccountDidLoad = Notification.Name("BiogramAccountDidLoad")
 }
 
-/// Singleton manager that exposes current Biogram state to the app.
-/// All Biogram state is local-only and stored separately for every Telegram account.
+/// Singleton manager for Biogram state. Private/local data stays per Telegram account,
+/// while public profile customizations are synchronized by BiogramCloudService.
 public final class BiogramManager {
     public static let shared = BiogramManager()
 

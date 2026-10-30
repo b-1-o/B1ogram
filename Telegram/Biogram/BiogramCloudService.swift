@@ -207,7 +207,10 @@ public final class BiogramCloudService {
             case "completed":
                 _ = self.writeSecureValue(Data(flow.flowId.utf8), accountId: accountId, key: "session")
                 self.setPendingFlow(nil, accountId: accountId)
-                if status.isNewUser == true {
+                let preserveLocalProfile = status.isNewUser == true
+                    || self.readSecureValue(accountId: accountId, key: "prefer-local-profile") != nil
+                if preserveLocalProfile {
+                    _ = self.writeSecureValue(nil, accountId: accountId, key: "prefer-local-profile")
                     self.syncLocalProfile(accountId: accountId)
                 } else {
                     self.loadMyProfile(accountId: accountId, token: flow.flowId)
@@ -252,14 +255,16 @@ public final class BiogramCloudService {
     }
 
     private func syncLocalProfile(accountId: String) {
-        guard let token = self.bearerToken(accountId: accountId) else { return }
+        guard BiogramManager.shared.activeAccountId == accountId,
+              BiogramManager.shared.isLoaded,
+              let token = self.bearerToken(accountId: accountId) else { return }
         let payload = BiogramManager.shared.cloudProfilePayload()
         guard let body = try? JSONEncoder().encode(payload) else { return }
         let request = self.makeRequest(path: "v1/profile/me", method: "PUT", body: body, token: token)
         self.send(request) { [weak self] _, response, error in
             guard let self else { return }
             if response?.statusCode == 401 {
-                self.restartEnrollment(accountId: accountId)
+                self.restartEnrollment(accountId: accountId, preserveLocalProfile: true)
                 return
             }
             guard error == nil, response?.statusCode == 200 else { return }
@@ -299,6 +304,8 @@ public final class BiogramCloudService {
     private func syncCardArtwork(accountId: String, token: String) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            guard BiogramManager.shared.activeAccountId == accountId,
+                  BiogramManager.shared.isLoaded else { return }
             let image = BiogramManager.shared.profileCardImage()
             let path = "v1/profile/me/card-image"
 
@@ -337,7 +344,7 @@ public final class BiogramCloudService {
     }
 
     /// A revoked or expired 30-day session is re-established using the saved Telegram identity.
-    private func restartEnrollment(accountId: String) {
+    private func restartEnrollment(accountId: String, preserveLocalProfile: Bool = false) {
         guard let identityData = self.readSecureValue(accountId: accountId, key: "telegram-id"),
               let telegramId = String(data: identityData, encoding: .utf8),
               !telegramId.isEmpty else {
@@ -345,6 +352,9 @@ public final class BiogramCloudService {
             return
         }
         _ = self.writeSecureValue(nil, accountId: accountId, key: "session")
+        if preserveLocalProfile {
+            _ = self.writeSecureValue(Data("1".utf8), accountId: accountId, key: "prefer-local-profile")
+        }
         self.lock.lock()
         self.attemptedBootstrapAccounts.remove(accountId)
         self.lock.unlock()

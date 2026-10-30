@@ -218,7 +218,7 @@ async function finishTelegramLogin(request, env) {
     ).bind(identity.telegramSub, identity.telegramId).first();
 
     let userId = existing?.id;
-    const isNewUser = !userId;
+    let isNewUser = !userId;
     if (!userId) {
       userId = crypto.randomUUID();
       await env.DB.prepare(
@@ -228,6 +228,13 @@ async function finishTelegramLogin(request, env) {
       await env.DB.prepare(
         "UPDATE users SET telegram_sub = ?, telegram_id = ?, username = ?, display_name = ?, updated_at = ? WHERE id = ?"
       ).bind(identity.telegramSub, identity.telegramId, identity.username, identity.displayName, timestamp, userId).run();
+    }
+
+    if (userId && !isNewUser) {
+      const existingSettings = await env.DB.prepare(
+        "SELECT user_id FROM user_card_settings WHERE user_id = ? LIMIT 1"
+      ).bind(userId).first();
+      if (!existingSettings) isNewUser = true;
     }
 
     const defaultProfile = JSON.stringify({
